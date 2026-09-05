@@ -101,6 +101,19 @@ export function flagString(argv: Argv, name: string): string | undefined {
 	return typeof value === 'string' ? value : undefined;
 }
 
+const PLAYWRIGHT_HELP = `journey: this command needs @playwright/test next to @dorsk/journey.
+Install it with:  npm i -D @playwright/test && npx playwright install chromium`;
+
+async function load<T>(module: Promise<T>): Promise<T> {
+	try {
+		return await module;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (message.includes('@playwright/test')) throw new Error(PLAYWRIGHT_HELP);
+		throw error;
+	}
+}
+
 async function main(args: string[]): Promise<number> {
 	const argv = parseArgv(args);
 	const command = argv.command;
@@ -120,15 +133,15 @@ async function main(args: string[]): Promise<number> {
 		case 'compile':
 			return (await import('./compile.js')).runCompile(argv);
 		case 'check':
-			return (await import('./check.js')).runCheck(argv);
+			return (await load(import('./check.js'))).runCheck(argv);
 		case 'test':
-			return (await import('./test.js')).runTest(argv);
+			return (await load(import('./test.js'))).runTest(argv);
 		case 'record':
-			return (await import('./record.js')).runRecord(argv);
+			return (await load(import('./record.js'))).runRecord(argv);
 		case 'book':
-			return (await import('./book.js')).runBook(argv);
+			return (await load(import('./book.js'))).runBook(argv);
 		case 'pages':
-			return (await import('./pages.js')).runPages(argv);
+			return (await load(import('./pages.js'))).runPages(argv);
 		default:
 			console.error(`journey: unknown command "${command}"\n`);
 			console.error(USAGE);
