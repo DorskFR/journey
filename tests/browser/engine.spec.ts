@@ -66,10 +66,9 @@ test('guide mode with a simulated human', async ({ page }) => {
 		Object.assign(spot.style, { background: 'rgb(255, 0, 255)', pointerEvents: 'auto' });
 		return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
 	});
-	const [r, g, b] = await pixelAt(page, centre.x, centre.y);
-	expect(r).toBeGreaterThan(250);
-	expect(g).toBeLessThan(5);
-	expect(b).toBeGreaterThan(250);
+	await expect
+		.poll(() => pixelAt(page, centre.x, centre.y), { timeout: 5000 })
+		.toEqual([255, 0, 255]);
 	await page.evaluate(() => {
 		const spot = (window.__journey as NonNullable<typeof window.__journey>).overlay.parts.spot;
 		Object.assign(spot.style, { background: '', pointerEvents: '' });

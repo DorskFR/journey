@@ -6,7 +6,15 @@ import { Engine, type Presenter, type RunResult } from './engine.js';
 import { createOverlay, type Overlay } from './overlay.js';
 import { docPresenter, guidePresenter, nonePresenter } from './presenters.js';
 import { clearProgress, readProgress, writeProgress } from './progress.js';
-import { currentLocale, type Params, resolveText } from './text.js';
+import {
+	accessibleName,
+	computedRole,
+	isVisible,
+	resolveAll,
+	resolveOne,
+	resolvePath,
+} from './resolve.js';
+import { currentLocale, type Params, resolveStepParams, resolveText } from './text.js';
 
 export * from './actors.js';
 export * from './driver.js';
@@ -40,7 +48,18 @@ export interface StartOptions {
 	variant?: Record<string, string>;
 }
 
+export const resolve = {
+	resolveOne,
+	resolveAll,
+	resolvePath,
+	accessibleName,
+	computedRole,
+	isVisible,
+	resolveStepParams,
+};
+
 export interface JourneyApi {
+	resolve: typeof resolve;
 	register(journeys: Journey[]): void;
 	list(): Array<{ id: string; title?: string; version: number }>;
 	start(id: string, opts?: StartOptions): Promise<RunResult>;
@@ -218,6 +237,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 	}
 
 	const api: JourneyApi = {
+		resolve,
 		register,
 		list() {
 			return Array.from(journeys.values(), (ir) => ({

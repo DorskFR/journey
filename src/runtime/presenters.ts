@@ -120,7 +120,8 @@ export function guidePresenter(overlay: Overlay): Presenter {
 	return {
 		show(_step, el, ctx) {
 			human = ctx.human;
-			attachKey(ctx.exit);
+			if (ctx.human) attachKey(ctx.exit);
+			else detachKey();
 			const { spot, card } = overlay.parts;
 			spot.classList.remove('doc');
 			const cursorPart = ctx.human ? [] : ['cursor' as const];
@@ -138,6 +139,7 @@ export function guidePresenter(overlay: Overlay): Presenter {
 		},
 		settle() {
 			overlay.parts.toast.hidden = true;
+			overlay.layout();
 		},
 		hide() {
 			detachKey();
@@ -182,6 +184,7 @@ export function docPresenter(overlay: Overlay): Presenter {
 		},
 		settle() {
 			overlay.parts.toast.hidden = true;
+			overlay.layout();
 		},
 		hide() {
 			hideAll(overlay);

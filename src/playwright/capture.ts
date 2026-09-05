@@ -19,7 +19,11 @@ export async function captureStep(page: Page, spec: Capture, ctx: CaptureContext
 	return page.screenshot({ type: 'png', clip: clipRect(ctx.rect, viewport) });
 }
 
-export async function startVideo(page: Page, path: string): Promise<() => Promise<void>> {
-	await page.screencast.start({ path });
+export async function startVideo(
+	page: Page,
+	path: string,
+	size?: { width: number; height: number },
+): Promise<() => Promise<void>> {
+	await page.screencast.start(size ? { path, size } : { path });
 	return () => page.screencast.stop();
 }

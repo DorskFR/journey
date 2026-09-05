@@ -180,7 +180,9 @@ class OverlayImpl implements Overlay {
 	}
 
 	target(): DOMRect | null {
-		return this.current?.isConnected ? this.current.getBoundingClientRect() : null;
+		if (!this.current?.isConnected) return null;
+		const rect = this.current.getBoundingClientRect();
+		return rect.width === 0 && rect.height === 0 ? null : rect;
 	}
 
 	track(el: Element | null): void {
@@ -195,6 +197,10 @@ class OverlayImpl implements Overlay {
 		const pad = 6;
 		const vw = window.innerWidth;
 		const vh = window.innerHeight;
+		const anchored = rect ? '' : 'hidden';
+		for (const name of ['spot', 'badge', 'cursor', 'ripple'] as const) {
+			parts[name].style.visibility = anchored;
+		}
 		if (rect) {
 			Object.assign(parts.spot.style, {
 				top: `${rect.top - pad}px`,

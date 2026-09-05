@@ -133,11 +133,7 @@ export async function captureContext(
 	return page.evaluate(
 		([s, t, p]) => {
 			const journey = window.__journey as Api;
-			const runtime = (
-				window as unknown as {
-					journeyRuntime: typeof import('../runtime/index.js');
-				}
-			).journeyRuntime;
+			const runtime = journey.resolve;
 			let rect: Rect | null = null;
 			if (t !== undefined) {
 				const el = journey.overlay.target();

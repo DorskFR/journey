@@ -16,8 +16,9 @@ Commands:
   check [--strict]                                   run every journey and variant headlessly
   test [playwright args...]                          run journeys through Playwright test
   record <url> [-o dir] [--no-har] [--headless]      record a journey in a browser
-  book                                               not implemented yet
-  pages                                              not implemented yet
+  book [id...] [--presenter p] [--video] [--variant dim=value]
+                                                     capture screenshots, video and a report per journey and variant
+  pages                                              screenshot every configured page per variant
 
 Options:
   --config <path>   config file, default journey.config.ts
@@ -39,9 +40,29 @@ const COMMAND_HELP: Record<string, string> = {
   -o dir       output directory, default journeys
   --no-har     do not record a HAR file
   --headless   run headless and exit after the first export`,
+	book: `Usage: journey book [id...] [--presenter doc|guide|none] [--video] [--variant dim=value ...] [--config path]
+
+  id...                journeys to book, default all
+  --presenter p        presenter shown in captures, default config.presenter or doc
+  --video              record tour.webm for every journey (also when a capture has video: true)
+  --variant dim=value  only run variants matching, may repeat`,
+	pages: `Usage: journey pages [--config path]
+
+  screenshots every config.pages route per variant to <out>/pages/<name>/<variantKey>.png`,
 };
 
 const VALUE_FLAGS = new Set(['config', 'o', 'variant', 'presenter']);
+const REPEATABLE_FLAGS = new Set(['variant']);
+export const REPEAT_SEPARATOR = ',';
+
+function setFlag(out: Argv, name: string, value: string | boolean): void {
+	const previous = out.flags[name];
+	if (REPEATABLE_FLAGS.has(name) && typeof previous === 'string' && typeof value === 'string') {
+		out.flags[name] = `${previous}${REPEAT_SEPARATOR}${value}`;
+		return;
+	}
+	out.flags[name] = value;
+}
 
 export function parseArgv(args: string[]): Argv {
 	const out: Argv = { command: undefined, positional: [], flags: {}, rest: [] };
@@ -56,12 +77,12 @@ export function parseArgv(args: string[]): Argv {
 			const name = arg.replace(/^-+/, '');
 			const eq = name.indexOf('=');
 			if (eq >= 0) {
-				out.flags[name.slice(0, eq)] = name.slice(eq + 1);
+				setFlag(out, name.slice(0, eq), name.slice(eq + 1));
 			} else if (VALUE_FLAGS.has(name) && i + 1 < args.length) {
-				out.flags[name] = args[i + 1] as string;
+				setFlag(out, name, args[i + 1] as string);
 				i += 1;
 			} else {
-				out.flags[name] = true;
+				setFlag(out, name, true);
 			}
 		} else if (out.command === undefined) {
 			out.command = arg;
@@ -99,9 +120,9 @@ async function main(args: string[]): Promise<number> {
 		case 'record':
 			return (await import('./record.js')).runRecord(argv);
 		case 'book':
+			return (await import('./book.js')).runBook(argv);
 		case 'pages':
-			console.error(`journey ${command}: not implemented yet`);
-			return 1;
+			return (await import('./pages.js')).runPages(argv);
 		default:
 			console.error(`journey: unknown command "${command}"\n`);
 			console.error(USAGE);

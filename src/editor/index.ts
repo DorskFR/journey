@@ -15,7 +15,7 @@ import { exportDraft, toJourney } from './export.js';
 import { type Located, locate } from './locate.js';
 import { createObserver } from './observe.js';
 import { createPanel, type PanelView, type StepResult } from './panel.js';
-import { currentRoute } from './runtime.js';
+import { currentRoute, useRuntime } from './runtime.js';
 
 export { digest, suggest } from './digest.js';
 export type { Draft, DraftStep, Suggestion } from './draft.js';
@@ -47,6 +47,7 @@ let mounted: EditorApi | null = null;
 export function mountEditor(api: JourneyApi | undefined = window.__journey): EditorApi {
 	if (mounted) return mounted;
 	if (!api) throw new Error('journey: mount the runtime before the editor');
+	useRuntime(api.resolve);
 
 	const restored = readState();
 	let draft: Draft = restored?.draft ?? emptyDraft();

@@ -287,6 +287,7 @@ interface JourneyApi {
 	translate(text: Text, locale?: string): string;
 	driver: Driver;                            // section 7
 	overlay: Overlay;
+	resolve: { resolveOne, resolveAll, resolvePath, accessibleName, computedRole, isVisible, resolveStepParams };
 	version: string;
 }
 
@@ -400,7 +401,8 @@ guide; for doc only the outline and a numbered badge), `card` (title, body,
 bottom right), `caption` (doc presenter text near the target), and a `panel`
 slot the editor fills. Cursor and ripple are hidden for the human actor.
 Positions are recomputed on `resize` and `scroll` (capture phase) while a
-step is shown. Escape exits a guide run. The spotlight scrolls the target
+step is shown. Escape exits a guide run only for the human actor; driven and
+preview runs ignore it so a scripted Escape keystroke is not an exit. The spotlight scrolls the target
 into view (`scrollIntoView({ block: 'center' })`) before measuring.
 
 Colors: accent `#ffd166`, text `#111`, card background `#fff`, dim
@@ -572,7 +574,8 @@ or cross.
   `<dir>/fixtures/<id>.storage.json` when the export event arrives, writes
   `<dir>/<id>.journey.ts`, prints the paths, keeps the browser open until it
   is closed. Default dir: `journeys`.
-- `book [id...] [--presenter doc|guide] [--video] [--variant dim=value]`: for
+- `book [id...] [--presenter doc|guide] [--video] [--variant dim=value]`: journeys
+  are compiled with `public: true` because the book is customer-facing; for
   each journey and variant runs with the chosen presenter, captures every
   capture step to `<out>/<id>/<variantKey>/<NN>-<name>.png`, records
   `tour.webm` when `--video` or any capture has `video`, converts to `mp4`
@@ -592,7 +595,7 @@ Playwright page, three per row, 400 px wide cells with a 1-based number badge,
 and screenshots it. No ffmpeg for the storyboard.
 
 `report.ts`: `manifest` is
-`{ id, title, version, generatedAt, variants: Record<variantKey, { captures: Array<{ index, name, file, title, body }>, video?: Record<format, file>, storyboard: string }> }`.
+`{ id, title, version, variants: Record<variantKey, { captures: Array<{ index, name, file, title, body }>, video?: Record<format, file>, storyboard: string }> }`.
 `index.md` has the journey title, then per variant a heading and one figure
 per capture: image, then the resolved `say.title` in bold and `say.body`.
 `index.html` is the same as a fragment with `<figure>`/`<figcaption>`.
