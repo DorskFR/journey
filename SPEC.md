@@ -279,7 +279,8 @@ returns and installs `window.__journey`:
 interface JourneyApi {
 	register(journeys: Journey[]): void;        // validate, compile, add to the list (replaces same id)
 	list(): Array<{ id: string; title?: string; version: number }>;
-	start(id: string, opts?: { mode?: 'guide' | 'preview'; from?: number; params?: Record<string, string> }): Promise<RunResult>;
+	start(id: string, opts?: { mode?: 'guide' | 'preview' | 'run'; from?: number; params?: Record<string, string> }): Promise<RunResult>;
+	                                           // guide: human actor + guide presenter; preview: dom actor + guide presenter; run: dom actor + no presenter
 	stop(): void;
 	current(): { id: string; index: number } | null;
 	applyVariant(dim: string, value: string): Promise<void>;
