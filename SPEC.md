@@ -93,9 +93,16 @@ tests/
   browser/*.spec.ts        run by the `browser` project against demo/
 ```
 
-Build: `tsc -p tsconfig.build.json` emits `dist/**` as ESM with types.
+Build: `scripts/version.mjs` writes `src/version.ts` from package.json;
+`tsc -p tsconfig.build.json` emits `dist/**` as ESM with types;
 `scripts/bundle.mjs` produces `dist/runtime.iife.js` (global `journeyRuntime`)
-and `dist/editor.iife.js` (global `journeyEditor`) with esbuild. The editor
+and `dist/editor.iife.js` (global `journeyEditor`) with esbuild, plus
+CommonJS copies `dist/index.cjs` and `dist/playwright/index.cjs` served by
+the `require` export conditions. Playwright transpiles a user's `.ts` config,
+journeys and specs to CommonJS when their package has no `"type": "module"`,
+and a `require` of an ES module that is still being linked by the runner
+fails, so those two entry points must exist in both formats. Dynamic imports
+of user files unwrap the extra `default` that such transpiled modules carry. The editor
 bundle imports core (print) and runtime pieces it needs; it must work when
 loaded after `runtime.iife.js` on a page, or as an ESM import in an app.
 

@@ -20,8 +20,7 @@ export function configPath(path?: string): string {
 
 export async function loadConfig(path?: string): Promise<LoadedConfig> {
 	const abs = configPath(path);
-	const mod = (await import(pathToFileURL(abs).href)) as { default?: Config };
-	const config = mod.default;
+	const config = importDefault<Config>(await import(pathToFileURL(abs).href));
 	if (!config || typeof config !== 'object') {
 		throw new Error(`journey: ${abs} has no default export`);
 	}
@@ -101,4 +100,17 @@ export function variantLabel(variant: Record<string, string>): string {
 	return Object.entries(variant)
 		.map(([dim, value]) => `${dim}=${value}`)
 		.join(' ');
+}
+
+export function importDefault<T>(mod: unknown): T | undefined {
+	let value = (mod as { default?: unknown }).default;
+	while (
+		value !== null &&
+		typeof value === 'object' &&
+		'__esModule' in value &&
+		'default' in value
+	) {
+		value = (value as { default?: unknown }).default;
+	}
+	return value as T | undefined;
 }

@@ -1,5 +1,6 @@
 import { compile } from '../core/compile.js';
 import type { IR, Journey, Text } from '../core/types.js';
+import { VERSION } from '../version.js';
 import { domActor, humanActor } from './actors.js';
 import { createDriver, MODE as DRIVER_MODE, type Driver } from './driver.js';
 import { Engine, type Presenter, type RunResult } from './engine.js';
@@ -25,8 +26,6 @@ export * from './presenters.js';
 export * from './progress.js';
 export * from './resolve.js';
 export * from './text.js';
-
-export const VERSION = '0.0.0';
 
 export type Mode = 'guide' | 'preview' | 'run';
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { VERSION } from '../version.js';
 
 export interface Argv {
 	command: string | undefined;
@@ -22,7 +23,8 @@ Commands:
 
 Options:
   --config <path>   config file, default journey.config.ts
-  --help            show this help`;
+  --help            show this help
+  --version         print the version`;
 
 const COMMAND_HELP: Record<string, string> = {
 	compile: `Usage: journey compile [--public] [-o file] [--config path]
@@ -102,6 +104,10 @@ export function flagString(argv: Argv, name: string): string | undefined {
 async function main(args: string[]): Promise<number> {
 	const argv = parseArgv(args);
 	const command = argv.command;
+	if (argv.flags.version) {
+		console.log(VERSION);
+		return 0;
+	}
 	if (command === undefined || (argv.flags.help && !command)) {
 		console.log(USAGE);
 		return argv.flags.help ? 0 : 1;

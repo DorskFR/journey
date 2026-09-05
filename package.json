@@ -32,7 +32,8 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     },
     "./runtime": {
       "types": "./dist/runtime/index.d.ts",
@@ -44,7 +45,8 @@
     },
     "./playwright": {
       "types": "./dist/playwright/index.d.ts",
-      "default": "./dist/playwright/index.js"
+      "import": "./dist/playwright/index.js",
+      "require": "./dist/playwright/index.cjs"
     },
     "./runtime.iife.js": "./dist/runtime.iife.js",
     "./editor.iife.js": "./dist/editor.iife.js",
@@ -55,8 +57,8 @@
     "provenance": true
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/bundle.mjs",
-    "check": "tsc -p tsconfig.json",
+    "build": "node scripts/version.mjs && tsc -p tsconfig.build.json && node scripts/bundle.mjs",
+    "check": "node scripts/version.mjs && tsc -p tsconfig.json",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "npm run build && playwright test",

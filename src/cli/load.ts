@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { compile } from '../core/compile.js';
 import type { CompileOptions, IR, Journey } from '../core/types.js';
 import { validate } from '../core/validate.js';
-import { journeyFiles, type LoadedConfig } from './config.js';
+import { importDefault, journeyFiles, type LoadedConfig } from './config.js';
 
 export interface LoadedJourney {
 	file: string;
@@ -26,7 +26,7 @@ export async function loadJourneys(
 		const label = relative(process.cwd(), file) || file;
 		let journey: unknown;
 		try {
-			journey = ((await import(pathToFileURL(file).href)) as { default?: unknown }).default;
+			journey = importDefault<unknown>(await import(pathToFileURL(file).href));
 		} catch (error) {
 			errors.push(`${label}: import failed: ${error instanceof Error ? error.message : error}`);
 			continue;
