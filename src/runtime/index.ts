@@ -3,7 +3,7 @@ import type { IR, Journey, Text } from '../core/types.js';
 import { VERSION } from '../version.js';
 import { domActor, humanActor, steppedActor } from './actors.js';
 import { createDriver, MODE as DRIVER_MODE, type Driver } from './driver.js';
-import { Engine, type Presenter, type RunResult } from './engine.js';
+import { type Actor, Engine, type Presenter, type RunResult } from './engine.js';
 import { createOverlay, type Overlay } from './overlay.js';
 import { docPresenter, guidePresenter, nonePresenter } from './presenters.js';
 import { clearProgress, readProgress, writeProgress } from './progress.js';
@@ -15,6 +15,13 @@ import {
 	resolveOne,
 	resolvePath,
 } from './resolve.js';
+import {
+	type Localize,
+	resolveStrings,
+	type Strings,
+	type StringsOption,
+	translator,
+} from './strings.js';
 import { currentLocale, type Params, resolveStepParams, resolveText } from './text.js';
 
 export * from './actors.js';
@@ -25,6 +32,7 @@ export * from './overlay.js';
 export * from './presenters.js';
 export * from './progress.js';
 export * from './resolve.js';
+export * from './strings.js';
 export * from './text.js';
 
 export type Mode = 'guide' | 'preview' | 'run';
@@ -38,6 +46,7 @@ export interface MountOptions {
 	track?: (event: string, data: Record<string, unknown>) => void;
 	exportUrl?: string;
 	launcher?: boolean;
+	strings?: StringsOption;
 }
 
 export interface StartOptions {
@@ -66,6 +75,7 @@ export interface JourneyApi {
 	current(): { id: string; index: number } | null;
 	applyVariant(dim: string, value: string): Promise<void>;
 	translate(text: Text, locale?: string): string;
+	strings(): Strings;
 	driver: Driver;
 	overlay: Overlay;
 	version: string;
@@ -86,6 +96,20 @@ function doneKey(ir: IR): string {
 	return `journey:done:${ir.id}@${ir.version}`;
 }
 
+function localized(actor: Actor, t: Localize): Actor {
+	return {
+		...actor,
+		navigate(route, ctx) {
+			const presenter: Presenter = {
+				...ctx.presenter,
+				message: (_title, _body, exit, next) =>
+					ctx.presenter.message?.(t('goToPage'), t('goToPageBody', { route }), exit, next),
+			};
+			return actor.navigate(route, { ...ctx, presenter });
+		},
+	};
+}
+
 function onReady(fn: () => void): void {
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', fn, { once: true });
@@ -101,13 +125,16 @@ export function mount(options: MountOptions = {}): JourneyApi {
 	const overlay = createOverlay();
 	let engine: Engine | null = null;
 	let currentId: string | null = null;
+	let currentVariant: Record<string, string> = DEFAULT_VARIANT;
 
 	const translate = (text: Text, locale?: string): string =>
 		resolveText(text, options.translate, locale ?? currentLocale()) ?? '';
+	const strings = (): Strings => resolveStrings(options.strings, currentLocale(currentVariant));
+	const t = translator(strings);
 
 	const presenterFor = (name: 'none' | 'doc' | 'guide'): Presenter => {
-		if (name === 'doc') return docPresenter(overlay);
-		if (name === 'guide') return guidePresenter(overlay);
+		if (name === 'doc') return docPresenter(overlay, t);
+		if (name === 'guide') return guidePresenter(overlay, t);
 		return nonePresenter;
 	};
 
@@ -132,11 +159,17 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		if (engine) engine.stop();
 		const mode: Mode = opts.mode ?? 'guide';
 		const variant = { ...DEFAULT_VARIANT, ...opts.variant };
+		currentVariant = variant;
 		const params: Params = { ...opts.params };
 		for (const [dim, value] of Object.entries(variant)) params[`variant.${dim}`] = value;
 		const run = new Engine(ir, {
-			actor: mode === 'guide' ? humanActor : mode === 'preview' ? steppedActor : domActor,
-			presenter: mode === 'run' ? nonePresenter : guidePresenter(overlay),
+			actor:
+				mode === 'guide'
+					? localized(humanActor, t)
+					: mode === 'preview'
+						? localized(steppedActor, t)
+						: domActor,
+			presenter: mode === 'run' ? nonePresenter : guidePresenter(overlay, t),
 			params,
 			variant,
 			translate: options.translate,
@@ -278,6 +311,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 			console.warn(`journey: no variant handler for "${dim}", set data-${dim}="${value}"`);
 		},
 		translate,
+		strings,
 		driver,
 		overlay,
 		version: VERSION,

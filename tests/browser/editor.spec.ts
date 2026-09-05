@@ -199,7 +199,11 @@ test('Run marks rows and Preview shows the guide card', async ({ page }) => {
 
 	await page.goto(`${BASE}/?journey=edit`);
 	await page.waitForFunction(() => typeof window.__journeyEditor !== 'undefined');
+	await expect(panel(page, 'toggle')).toHaveAttribute('aria-expanded', 'false');
+	await expect(panel(page, 'toggle')).toHaveText('journey');
+	await panel(page, 'toggle').click();
 	await panel(page, 'preview').click();
+	await expect(panel(page, 'toggle')).toHaveAttribute('aria-expanded', 'false');
 	await expect(page.locator('journey-overlay .card')).toContainText('Step 1 of 5');
 });
 
@@ -243,6 +247,31 @@ test('a run resumes after a full navigation', async ({ page }) => {
 	await expect(page.locator('[data-journey="token"]')).toHaveValue('secret');
 	await expect(page.locator('[data-editor="step"][data-result="pass"]')).toHaveCount(2);
 	expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark');
+	await expect(panel(page, 'toggle')).toHaveAttribute('aria-expanded', 'false');
+	await expect(panel(page, 'step').locator('visible=true')).toHaveCount(0);
+});
+
+test('collapsed state and dock side survive a reload', async ({ page }) => {
+	await page.goto(`${BASE}/?journey=edit`);
+	await waitForEditor(page);
+	const root = panel(page, 'panel');
+	await expect(root).toHaveAttribute('data-dock', 'right');
+	await panel(page, 'dock').click();
+	await expect(root).toHaveAttribute('data-dock', 'left');
+	await panel(page, 'toggle').click();
+	await expect(panel(page, 'toggle')).toHaveAttribute('aria-expanded', 'false');
+	await expect(panel(page, 'toggle')).toHaveText('journey');
+	await expect(root).toBeHidden();
+
+	await page.reload();
+	await page.waitForFunction(() => typeof window.__journeyEditor !== 'undefined');
+	await expect(panel(page, 'toggle')).toHaveAttribute('aria-expanded', 'false');
+	await expect(panel(page, 'toggle')).toHaveText('journey');
+	await expect(root).toBeHidden();
+	await panel(page, 'toggle').click();
+	await expect(panel(page, 'toggle')).toHaveAttribute('aria-expanded', 'true');
+	await expect(root).toBeVisible();
+	await expect(root).toHaveAttribute('data-dock', 'left');
 });
 
 test('values fill masked params and are missing when cleared', async ({ page }) => {

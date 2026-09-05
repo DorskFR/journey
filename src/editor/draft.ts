@@ -21,11 +21,15 @@ export interface Draft {
 
 export type StepResult = 'pass' | 'fail' | 'skip';
 
+export type Dock = 'right' | 'left';
+
 export interface DraftState {
 	draft: Draft;
 	recording: boolean;
 	lastRoute: string;
 	results: Record<number, StepResult>;
+	collapsed: boolean;
+	dock: Dock;
 }
 
 export const STORAGE_KEY = 'journey:draft';
@@ -45,6 +49,8 @@ export function readState(): DraftState | null {
 			recording: parsed.recording === true,
 			lastRoute: typeof parsed.lastRoute === 'string' ? parsed.lastRoute : '',
 			results: parsed.results ?? {},
+			collapsed: parsed.collapsed === true,
+			dock: parsed.dock === 'left' ? 'left' : 'right',
 		};
 	} catch {
 		return null;

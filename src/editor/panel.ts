@@ -1,5 +1,5 @@
 import type { Interaction, Target } from '../core/types.js';
-import type { Draft, DraftStep, StepResult } from './draft.js';
+import type { Dock, Draft, DraftStep, StepResult } from './draft.js';
 import { describeTarget } from './runtime.js';
 
 export type { StepResult };
@@ -35,6 +35,8 @@ export interface PanelView {
 	errors: Record<number, string>;
 	error: string | null;
 	status: string | null;
+	collapsed: boolean;
+	dock: Dock;
 	varNames: string[];
 	vars: Record<string, string>;
 	expectForm: ExpectForm | null;
@@ -46,6 +48,8 @@ export interface PanelActions {
 	preview(): void;
 	run(): void;
 	export(): void;
+	collapse(collapsed: boolean): void;
+	dock(side: Dock): void;
 	field(name: 'id' | 'title', value: string): void;
 	say(index: number, field: 'title' | 'body', value: string): void;
 	capture(index: number, on: boolean): void;
@@ -72,10 +76,12 @@ export interface Panel {
 }
 
 const CSS_TEXT = `
-.jp{width:360px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);margin:8px;display:flex;flex-direction:column;border-radius:8px;background:#fff;color:#111;box-shadow:0 8px 24px rgba(0,0,0,.25);font:13px/1.4 system-ui,sans-serif}
+.jp{position:fixed;top:8px;right:8px;width:360px;max-width:calc(100vw - 16px);max-height:80vh;display:flex;flex-direction:column;border-radius:8px;background:#fff;color:#111;box-shadow:0 8px 24px rgba(0,0,0,.25);font:13px/1.4 system-ui,sans-serif}
+.jp[data-dock=left]{right:auto;left:8px}
 .jp header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid #e5e5e5}
-.jp header strong{font-size:14px}
+.jp header strong{flex:1;font-size:14px}
 .jp .body{overflow:auto;padding:8px 12px}
+.pill{position:fixed;right:16px;bottom:16px;padding:6px 12px;border:1px solid #ccc;border-radius:16px;background:#fff;color:#111;box-shadow:0 4px 12px rgba(0,0,0,.25);font:13px/1.4 system-ui,sans-serif;cursor:pointer}
 .jp button{padding:4px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#111;font:inherit;cursor:pointer}
 .jp button:disabled{opacity:.5;cursor:default}
 .jp button.primary{background:#ffd166;border-color:#ffd166;font-weight:600}
@@ -345,7 +351,8 @@ function stepRow(
 }
 
 export function createPanel(container: HTMLElement, actions: PanelActions): Panel {
-	let open = true;
+	let collapsed = false;
+	let dock: Dock = 'right';
 	container.replaceChildren();
 	const style = el('style', {}, CSS_TEXT);
 	const body = el('div', { class: 'body' });
@@ -354,17 +361,39 @@ export function createPanel(container: HTMLElement, actions: PanelActions): Pane
 		{ type: 'button', 'data-editor': 'toggle', 'aria-expanded': 'true' },
 		'Hide',
 	);
-	let status: string | null = null;
-	const setOpen = (next: boolean): void => {
-		open = next;
-		body.hidden = !open;
-		toggle.textContent = open ? 'Hide' : (status ?? 'Show');
-		toggle.setAttribute('aria-expanded', String(open));
-	};
-	toggle.addEventListener('click', () => setOpen(!open));
-	const wrapper = el('div', { class: 'jp', role: 'region', 'aria-label': 'Journey editor' });
-	wrapper.append(el('header', {}, el('strong', {}, 'Journey editor'), toggle), body);
+	toggle.addEventListener('click', () => actions.collapse(!collapsed));
+	const dockButton = el('button', { type: 'button', 'data-editor': 'dock' });
+	dockButton.addEventListener('click', () => actions.dock(dock === 'right' ? 'left' : 'right'));
+	const header = el('header', {}, el('strong', {}, 'Journey editor'), dockButton);
+	const wrapper = el('div', {
+		class: 'jp',
+		'data-editor': 'panel',
+		role: 'region',
+		'aria-label': 'Journey editor',
+	});
+	wrapper.append(header, body);
 	container.append(style, wrapper);
+
+	const layout = (view: PanelView): void => {
+		collapsed = view.collapsed;
+		dock = view.dock;
+		wrapper.dataset.dock = dock;
+		wrapper.hidden = collapsed;
+		const other = dock === 'right' ? 'left' : 'right';
+		dockButton.textContent = `Dock ${other}`;
+		dockButton.setAttribute('aria-label', `Dock the panel on the ${other}`);
+		toggle.setAttribute('aria-expanded', String(!collapsed));
+		toggle.classList.toggle('pill', collapsed);
+		if (collapsed) {
+			toggle.textContent = view.status ?? (view.recording ? 'recording' : 'journey');
+			toggle.setAttribute('aria-label', 'Show the journey editor');
+			container.append(toggle);
+		} else {
+			toggle.textContent = 'Hide';
+			toggle.setAttribute('aria-label', 'Hide the journey editor');
+			header.append(toggle);
+		}
+	};
 
 	const button = (
 		label: string,
@@ -377,19 +406,14 @@ export function createPanel(container: HTMLElement, actions: PanelActions): Pane
 		return b;
 	};
 
-	const collapseThen = (action: () => void) => (): void => {
-		setOpen(false);
-		action();
-	};
-
 	const idInput = textInput({ 'data-editor': 'id' }, '', (v) => actions.field('id', v));
 	const titleInput = textInput({ 'data-editor': 'title' }, '', (v) => actions.field('title', v));
 	const fields = el('div', { class: 'fields' });
 	fields.append(el('label', {}, 'Id', idInput), el('label', {}, 'Title', titleInput));
 	const record = button('Record', 'record', 'primary', actions.record);
 	const stop = button('Stop', 'stop', 'rec', actions.stop);
-	const preview = button('Preview', 'preview', '', collapseThen(actions.preview));
-	const run = button('Run', 'run', '', collapseThen(actions.run));
+	const preview = button('Preview', 'preview', '', actions.preview);
+	const run = button('Run', 'run', '', actions.run);
 	const exportButton = button('Export', 'export', '', actions.export);
 	const toolbar = el('div', { class: 'toolbar' }, record, stop, preview, run, exportButton);
 	const content = el('div', {});
@@ -397,8 +421,7 @@ export function createPanel(container: HTMLElement, actions: PanelActions): Pane
 
 	return {
 		render(view) {
-			status = view.status;
-			setOpen(open);
+			layout(view);
 			const { draft } = view;
 			if (idInput.value !== draft.id) idInput.value = draft.id;
 			if (titleInput.value !== draft.title) titleInput.value = draft.title;

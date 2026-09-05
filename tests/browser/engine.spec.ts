@@ -1,7 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import type { IR } from '../../src/index.js';
 import type { RunResult } from '../../src/runtime/index.js';
-import { BASE, createNoteIR, ir, pixelAt, waitForApi } from './helpers.js';
+import { BASE, createNoteIR, ir, pixelAt, RUNTIME_INIT, waitForApi } from './helpers.js';
 
 declare global {
 	interface Window {
@@ -176,4 +176,59 @@ test('preview waits for Next before each step', async ({ page }) => {
 	await card(page).locator('button.next').click();
 	await expect.poll(() => result(page)).toEqual({ ok: true, completed: 2, failures: [] });
 	await expect(page.locator('[data-journey="dialog"]')).toBeVisible();
+});
+
+test('Enter advances a stepped preview after a fill left focus in an input', async ({ page }) => {
+	await register(page, [
+		ir({
+			id: 'search',
+			route: '/#notes',
+			steps: [
+				{
+					id: 'open',
+					route: '/#notes',
+					target: 'notes/search',
+					do: { kind: 'fill', value: 'milk' },
+				},
+				{ id: 'new', target: 'notes/new', do: { kind: 'click' }, expect: [{ visible: 'dialog' }] },
+			],
+		}),
+	]);
+	await start(page, 'search', { mode: 'preview' });
+	await expect(card(page)).toContainText('Open /#notes to continue.');
+	await expect(card(page).locator('button.next')).toBeFocused();
+	await page.keyboard.press('Enter');
+	await expect(card(page)).toContainText('Step 1 of 2');
+	await expect(card(page).locator('button.next kbd')).toHaveText('\u21b5');
+	await expect(card(page).locator('button.exit kbd')).toHaveText('Esc');
+	await page.keyboard.press('Enter');
+	await expect(page.locator('[data-journey="search"]')).toHaveValue('milk');
+	await expect(card(page)).toContainText('Step 2 of 2');
+	await page.keyboard.press('Enter');
+	await expect.poll(() => result(page)).toEqual({ ok: true, completed: 2, failures: [] });
+	await expect(page.locator('[data-journey="dialog"]')).toBeVisible();
+});
+
+test('mount strings override the card text', async ({ context }) => {
+	await context.addInitScript(RUNTIME_INIT);
+	const fresh = await context.newPage();
+	await fresh.goto(`${BASE}/`);
+	await fresh.evaluate(
+		(journeys) => {
+			const runtime = (
+				window as unknown as { journeyRuntime: typeof import('../../src/runtime/index.js') }
+			).journeyRuntime;
+			const api = runtime.mount({
+				strings: { next: 'Weiter', exit: 'Schließen', step: 'Schritt {i}/{n}' },
+			});
+			api.register(journeys);
+		},
+		[createNoteIR],
+	);
+	expect(await fresh.evaluate(() => window.__journey?.strings().next)).toBe('Weiter');
+	await start(fresh, 'create-note', { mode: 'preview', params: PARAMS });
+	await expect(card(fresh)).toContainText('Schritt 1/5');
+	await expect(card(fresh).locator('button.next')).toContainText('Weiter');
+	await expect(card(fresh).locator('button.exit')).toContainText('Schließen');
+	await expect(card(fresh).locator('button.next')).toBeFocused();
 });

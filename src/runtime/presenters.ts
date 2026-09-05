@@ -1,5 +1,6 @@
 import type { Presenter, ShowCtx } from './engine.js';
 import type { Overlay } from './overlay.js';
+import { defaultLocalize, type Localize } from './strings.js';
 
 export const nonePresenter: Presenter = {
 	show() {},
@@ -14,23 +15,35 @@ function hideAll(overlay: Overlay, keep: Array<keyof Overlay['parts']> = []): vo
 	}
 }
 
-function button(label: string, className: string, onClick: () => void): HTMLButtonElement {
+function button(
+	label: string,
+	hint: string | null,
+	className: string,
+	onClick: () => void,
+): HTMLButtonElement {
 	const el = document.createElement('button');
 	el.type = 'button';
 	el.className = className;
 	el.textContent = label;
+	if (hint !== null) {
+		const kbd = document.createElement('kbd');
+		kbd.textContent = hint;
+		el.append(' ', kbd);
+	}
 	el.addEventListener('click', onClick);
 	return el;
 }
 
 function fillCard(
 	card: HTMLElement,
+	t: Localize,
 	ctx: {
 		title?: string;
 		body?: string;
 		meta?: string;
 		next?: (() => void) | null;
 		exit: () => void;
+		hints: boolean;
 	},
 ): void {
 	card.replaceChildren();
@@ -53,19 +66,24 @@ function fillCard(
 	counter.textContent = ctx.meta ?? '';
 	const buttons = document.createElement('div');
 	buttons.className = 'buttons';
-	buttons.append(button('Exit', 'exit', ctx.exit));
-	if (ctx.next) buttons.append(button('Next', 'next', ctx.next));
+	buttons.append(button(t('exit'), ctx.hints ? 'Esc' : null, 'exit', ctx.exit));
+	let next: HTMLButtonElement | null = null;
+	if (ctx.next) {
+		next = button(t('next'), ctx.hints ? '\u21b5' : null, 'next', ctx.next);
+		buttons.append(next);
+	}
 	meta.append(counter, buttons);
 	card.append(meta);
+	next?.focus({ preventScroll: true });
 }
 
-function toast(overlay: Overlay, ctx: ShowCtx): void {
+function toast(overlay: Overlay, t: Localize, ctx: ShowCtx): void {
 	const el = overlay.parts.toast;
 	if (ctx.action.kind !== 'press') {
 		el.hidden = true;
 		return;
 	}
-	el.replaceChildren('Press ');
+	el.replaceChildren(`${t('press')} `);
 	const kbd = document.createElement('kbd');
 	kbd.textContent = ctx.action.key;
 	el.append(kbd);
@@ -119,7 +137,7 @@ function editable(target: EventTarget | null): boolean {
 	return target.matches('input,textarea,select');
 }
 
-export function guidePresenter(overlay: Overlay): Presenter {
+export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize): Presenter {
 	const cursor = cursorPresenter(overlay);
 	let onKey: ((event: KeyboardEvent) => void) | null = null;
 	const detachKey = (): void => {
@@ -145,20 +163,22 @@ export function guidePresenter(overlay: Overlay): Presenter {
 	return {
 		show(_step, el, ctx) {
 			human = ctx.human;
-			if (ctx.human || ctx.stepped) attachKey(ctx.exit, ctx.next);
+			const hints = ctx.human || ctx.stepped;
+			if (hints) attachKey(ctx.exit, ctx.next);
 			else detachKey();
 			const { spot, card } = overlay.parts;
 			spot.classList.remove('doc');
 			const cursorPart = ctx.human ? [] : ['cursor' as const];
 			hideAll(overlay, el ? ['spot', 'card', ...cursorPart] : ['card', ...cursorPart]);
-			fillCard(card, {
+			fillCard(card, t, {
 				title: ctx.title,
 				body: ctx.body,
-				meta: `Step ${ctx.index + 1} of ${ctx.total}`,
+				meta: t('step', { i: ctx.index + 1, n: ctx.total }),
 				next: ctx.next,
 				exit: ctx.exit,
+				hints,
 			});
-			toast(overlay, ctx);
+			toast(overlay, t, ctx);
 			overlay.track(el);
 			overlay.raise();
 		},
@@ -174,7 +194,7 @@ export function guidePresenter(overlay: Overlay): Presenter {
 		message(title, body, exit, next) {
 			attachKey(exit, next ?? null);
 			hideAll(overlay, ['card']);
-			fillCard(overlay.parts.card, { title, body, exit, next });
+			fillCard(overlay.parts.card, t, { title, body, exit, next, hints: true });
 			overlay.track(null);
 			overlay.raise();
 		},
@@ -187,7 +207,7 @@ export function guidePresenter(overlay: Overlay): Presenter {
 	};
 }
 
-export function docPresenter(overlay: Overlay): Presenter {
+export function docPresenter(overlay: Overlay, t: Localize = defaultLocalize): Presenter {
 	const cursor = cursorPresenter(overlay);
 	let human = false;
 	return {
@@ -203,7 +223,7 @@ export function docPresenter(overlay: Overlay): Presenter {
 				...(ctx.human ? [] : ['cursor' as const]),
 			];
 			hideAll(overlay, el ? ['spot', 'badge', ...extra] : extra);
-			toast(overlay, ctx);
+			toast(overlay, t, ctx);
 			overlay.track(el);
 			overlay.raise();
 		},

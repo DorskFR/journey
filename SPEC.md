@@ -276,6 +276,17 @@ interface MountOptions {
 	track?: (event: string, data: Record<string, unknown>) => void;
 	exportUrl?: string;                        // editor POST target
 	launcher?: boolean;                        // default false; small floating button listing journeys
+	strings?: Partial<Strings> | ((locale: string | undefined) => Partial<Strings>);
+	                                           // overrides for the runtime's own text; a function is called with the current locale at show time
+}
+
+interface Strings {
+	next: string;                              // 'Next'
+	exit: string;                              // 'Exit'
+	step: string;                              // 'Step {i} of {n}'
+	goToPage: string;                          // 'Go to another page'
+	goToPageBody: string;                      // 'Open {route} to continue.'
+	press: string;                             // 'Press' (keystroke toast prefix)
 }
 ```
 
@@ -292,6 +303,7 @@ interface JourneyApi {
 	current(): { id: string; index: number } | null;
 	applyVariant(dim: string, value: string): Promise<void>;
 	translate(text: Text, locale?: string): string;
+	strings(): Strings;                        // resolved runtime strings for the current locale
 	driver: Driver;                            // section 7
 	overlay: Overlay;
 	resolve: { resolveOne, resolveAll, resolvePath, accessibleName, computedRole, isVisible, resolveStepParams };
@@ -419,6 +431,16 @@ step is shown. Escape exits a guide run only for the human actor; driven and
 preview runs ignore it so a scripted Escape keystroke is not an exit. The spotlight scrolls the target
 into view (`scrollIntoView({ block: 'center' })`) before measuring.
 
+Presenter factories take the `t(key, vars)` helper built from `strings`
+(`guidePresenter(overlay, t)`, `docPresenter(overlay, t)`) and interpolate
+`{i}`, `{n}` and `{route}`. For the human and stepped actors the card's Next
+button reads the `next` string followed by `<kbd>↵</kbd>` and Exit reads the
+`exit` string followed by `<kbd>Esc</kbd>`; other runs show no hints. When a
+card with a Next button is shown, that button receives focus
+(`preventScroll`) so Enter and Space work even when the previous step left
+focus in an input; wait-for-user steps do not move focus. Keys typed into an
+editable element outside the overlay are ignored.
+
 Colors: accent `#ffd166`, text `#111`, card background `#fff`, dim
 `rgba(0,0,0,.55)`. Font `system-ui`. Keep the CSS in one template string.
 
@@ -492,8 +514,10 @@ cancels), and a value prefilled from the picked element or the current
 location. A failed row shows the engine's error text. A Values section lists
 every `var.*` parameter the draft references with password inputs; values
 live in `sessionStorage['journey:vars']` only, are passed as run params, and
-never enter the draft or the export. Preview and Run collapse the panel and
-the collapsed toggle shows `running k/n`, then `pass k/n` or `fail k/n`. Journey id and title
+never enter the draft or the export. Preview and Run collapse the panel; collapsed, only a small pill at the
+bottom right remains, showing `recording`, `running k/n`, `pass k/n`, `fail k/n`
+or `journey`. Expanded, the panel docks to the right or left edge with
+internal scrolling. Collapsed state and dock side persist with the draft. Journey id and title
 fields at the top. Preview runs the draft with `dom` actor and `guide`
 presenter from step 0. Run runs it with `dom` actor and `none` presenter and
 marks each row pass or fail. Export validates the draft, prints it, then

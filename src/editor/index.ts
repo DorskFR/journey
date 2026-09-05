@@ -5,6 +5,7 @@ import type { JourneyApi } from '../runtime/index.js';
 import { readProgress } from '../runtime/progress.js';
 import { type Digest, digest, suggest } from './digest.js';
 import {
+	type Dock,
 	type Draft,
 	type DraftStep,
 	emptyDraft,
@@ -116,6 +117,8 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 	let error: string | null = null;
 	let vars = readVars();
 	let expectForm: ExpectForm | null = null;
+	let collapsed = restored?.collapsed ?? false;
+	let dock: Dock = restored?.dock ?? 'right';
 
 	let pendingDigest: {
 		step: DraftStep;
@@ -133,7 +136,8 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		render();
 	};
 
-	const persist = (): void => writeState({ draft, recording, lastRoute: currentRoute(), results });
+	const persist = (): void =>
+		writeState({ draft, recording, lastRoute: currentRoute(), results, collapsed, dock });
 
 	const observer = createObserver<Prepared>({
 		ignore: (event) => event.composedPath().includes(api.overlay.host),
@@ -190,6 +194,7 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		const built = buildJourney();
 		if (!built) return;
 		running = true;
+		collapsed = true;
 		results = {};
 		errors = {};
 		outcome = null;
@@ -237,6 +242,7 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		const built = buildJourney();
 		if (!built) return;
 		running = true;
+		collapsed = true;
 		api.register([built]);
 		attach(api.engine());
 		render();
@@ -299,6 +305,14 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 				error = result.ok ? null : result.errors.map((e) => `${e.path}: ${e.message}`).join('\n');
 				render();
 			});
+		},
+		collapse(next) {
+			collapsed = next;
+			render();
+		},
+		dock(side) {
+			dock = side;
+			render();
 		},
 		field(name, value) {
 			draft[name] = value;
@@ -385,6 +399,8 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 			errors,
 			error,
 			status: status(),
+			collapsed,
+			dock,
 			varNames: varNames(draft),
 			vars,
 			expectForm,
