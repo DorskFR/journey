@@ -82,12 +82,21 @@ function cursorPresenter(overlay: Overlay): Pick<Presenter, 'moveCursor' | 'ripp
 			const first = cursor.hidden;
 			cursor.hidden = false;
 			if (first) cursor.style.transition = 'none';
-			cursor.style.transform = `translate(${x - 4}px, ${y - 2}px)`;
+			const next = `translate(${x - 4}px, ${y - 2}px)`;
+			const moved = cursor.style.transform !== next;
+			cursor.style.transform = next;
 			if (first) {
 				void cursor.offsetWidth;
 				cursor.style.transition = '';
+				return Promise.resolve();
 			}
-			return new Promise((resolve) => setTimeout(resolve, first ? 0 : 350));
+			const duration = Number.parseFloat(getComputedStyle(cursor).transitionDuration);
+			if (!moved || !(duration > 0)) return Promise.resolve();
+			return new Promise((resolve) => {
+				const done = (): void => resolve();
+				cursor.addEventListener('transitionend', done, { once: true });
+				cursor.addEventListener('transitioncancel', done, { once: true });
+			});
 		},
 		ripple(el) {
 			const ripple = overlay.parts.ripple;
