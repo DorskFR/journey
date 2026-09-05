@@ -1,0 +1,84 @@
+{
+  "name": "@dorsk/journey",
+  "version": "0.0.0",
+  "description": "Record a user journey once. Replay it as a QA test, an in-app guided tour, or screenshots and video for docs.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Dorsk <dorsk.dev@gmail.com>",
+  "homepage": "https://github.com/DorskFR/journey",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DorskFR/journey.git"
+  },
+  "keywords": [
+    "playwright",
+    "e2e",
+    "product-tour",
+    "onboarding",
+    "screenshots",
+    "documentation",
+    "recorder"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "journey": "./dist/cli/main.js"
+  },
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/runtime/index.js"
+    },
+    "./editor": {
+      "types": "./dist/editor/index.d.ts",
+      "default": "./dist/editor/index.js"
+    },
+    "./playwright": {
+      "types": "./dist/playwright/index.d.ts",
+      "default": "./dist/playwright/index.js"
+    },
+    "./runtime.iife.js": "./dist/runtime.iife.js",
+    "./editor.iife.js": "./dist/editor.iife.js",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/bundle.mjs",
+    "check": "tsc -p tsconfig.json",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "npm run build && playwright test",
+    "test:unit": "playwright test --project unit",
+    "test:browser": "npm run build && playwright test --project browser",
+    "prepare": "lefthook install || true",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@playwright/test": "^1.59.0"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.4.1",
+    "esbuild": "^0.28.2",
+    "lefthook": "^2.1.12",
+    "typescript": "^7.0.2"
+  }
+}
