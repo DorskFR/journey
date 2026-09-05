@@ -62,9 +62,7 @@ test('guide mode with a simulated human', async ({ page }) => {
 	const centre = await page.evaluate(() => {
 		const api = window.__journey as NonNullable<typeof window.__journey>;
 		const spot = api.overlay.parts.spot;
-		const rect = (
-			document.querySelector('[data-journey="dialog"]') as HTMLElement
-		).getBoundingClientRect();
+		const rect = api.overlay.target() as DOMRect;
 		Object.assign(spot.style, { background: 'rgb(255, 0, 255)', pointerEvents: 'auto' });
 		return { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) };
 	});

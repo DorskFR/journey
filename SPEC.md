@@ -512,7 +512,10 @@ protocol is used out of order.
 `inject.ts`: `runtimeSource()` and `editorSource()` read the IIFE files from
 `dist` next to the compiled module (`new URL('../runtime.iife.js', import.meta.url)`).
 
-`driver.ts`: `runJourney(page, ir, opts)` where opts are
+`driver.ts`: the start URL gets a `journey=run` query parameter so an app
+can decide to mount the runtime with its probes and variant handlers for
+driven runs (the demo does); the driver only mounts `{}` itself when the app
+did not. `runJourney(page, ir, opts)` where opts are
 `{ baseUrl, params, variant, presenter, mask, pace, onCapture?: (spec, ctx) => Promise<void>, applyVariant?: boolean }`.
 It adds the runtime as an init script on the page's context if not already
 added (track with a WeakSet), sets the viewport for the variant, navigates to
