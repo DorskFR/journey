@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Notes demo</title>
+	<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+	<header>
+		<nav data-journey="nav" aria-label="Main">
+			<a href="/" data-journey="to-home">Home</a>
+			<a href="/#notes" data-journey="to-notes">Notes</a>
+			<a href="/settings.html" data-journey="to-settings">Settings</a>
+		</nav>
+	</header>
+	<main id="app">
+		<section id="home" data-view="">
+			<h1>Notes demo</h1>
+			<p>A tiny notes app with no framework.</p>
+			<button type="button" data-journey="start">Get started</button>
+		</section>
+		<section id="notes" data-view="notes" data-journey="notes" hidden>
+			<h1>Notes</h1>
+			<div class="toolbar">
+				<button type="button" data-journey="new">New note</button>
+				<input type="search" aria-label="Search notes" data-journey="search" placeholder="Search notes">
+			</div>
+			<ul id="note-list" aria-label="Notes"></ul>
+			<p data-journey="empty" hidden>No notes yet.</p>
+			<p role="status" data-journey="toast" aria-live="polite" hidden></p>
+		</section>
+		<section data-journey="likes" aria-labelledby="likes-heading">
+			<h2 id="likes-heading">Likes</h2>
+			<div class="likes">
+				<button type="button">Like</button>
+				<button type="button">Like</button>
+				<button type="button">Like</button>
+				<button type="button">Like</button>
+				<button type="button">Like</button>
+				<button type="button">Like</button>
+			</div>
+			<p>Liked <span data-journey="like-count">0</span> times</p>
+		</section>
+		<section aria-labelledby="secret-heading">
+			<h2 id="secret-heading">Secret</h2>
+			<p data-journey-mask>Demo key: <code>sk-demo-0000-1111</code></p>
+			<button type="button" data-journey="reveal" aria-expanded="false">Reveal</button>
+			<div data-journey="secret" hidden>The secret is revealed.</div>
+		</section>
+	</main>
+	<dialog data-journey="dialog" aria-labelledby="dialog-heading">
+		<form method="dialog" id="note-form">
+			<h2 id="dialog-heading">New note</h2>
+			<label>Title <input name="title" data-journey="title" autocomplete="off"></label>
+			<label>Category <select name="category" data-journey="category">
+				<option value="work">work</option>
+				<option value="home">home</option>
+				<option value="idea">idea</option>
+			</select></label>
+			<label><input type="checkbox" name="pinned" data-journey="pinned"> Pin</label>
+			<div class="actions">
+				<button type="button" data-journey="cancel">Cancel</button>
+				<button type="submit" data-journey="save" disabled>Save</button>
+			</div>
+		</form>
+	</dialog>
+	<footer><span data-testid="version">demo 1.0</span></footer>
+	<script src="/app.js"></script>
+</body>
+</html>

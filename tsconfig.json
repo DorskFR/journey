@@ -3,14 +3,40 @@
 		"target": "ES2022",
 		"module": "nodenext",
 		"moduleResolution": "nodenext",
-		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"lib": [
+			"ES2022",
+			"DOM",
+			"DOM.Iterable"
+		],
 		"strict": true,
 		"noUncheckedIndexedAccess": true,
 		"verbatimModuleSyntax": true,
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
 		"noEmit": true,
-		"types": ["node"]
+		"types": [
+			"node"
+		],
+		"paths": {
+			"@dorsk/journey": [
+				"./src/index.ts"
+			],
+			"@dorsk/journey/runtime": [
+				"./src/runtime/index.ts"
+			],
+			"@dorsk/journey/editor": [
+				"./src/editor/index.ts"
+			],
+			"@dorsk/journey/playwright": [
+				"./src/playwright/index.ts"
+			]
+		}
 	},
-	"include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "*.ts"]
+	"include": [
+		"src/**/*.ts",
+		"tests/**/*.ts",
+		"demo/**/*.ts",
+		"scripts/**/*.ts",
+		"*.ts"
+	]
 }

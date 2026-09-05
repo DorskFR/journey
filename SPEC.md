@@ -176,7 +176,9 @@ plain JSON. `compile(journey, { public: true })` also removes steps with
 `defineConfig(c)` returns `c`. `msg(id)` returns `{ $msg: id }`. `param(p)`
 returns `{ $param: p }`.
 
-Config:
+Config. Every relative path or glob in a Config resolves against the
+directory of the config file, and `app.start` and fixture `command` run with
+that directory as their working directory unless `cwd` is set:
 
 ```ts
 export interface Fixture {
@@ -586,8 +588,9 @@ html, js, css, json, png, svg, ico; 404 otherwise; port from argv, default 4177)
 
 `index.html`:
 
-- `<nav data-journey="nav">` with links `home` (`/`), `notes` (`/#notes`),
-  `settings` (`/settings.html`), each `data-journey="<name>"`.
+- `<nav data-journey="nav">` with links `to-home` (`/`), `to-notes` (`/#notes`),
+  `to-settings` (`/settings.html`), each `data-journey="<name>"`. The prefix
+  keeps the bare path `notes` unambiguous for the section below.
 - Home view (hash `''`): heading "Notes demo", a "Get started" button
   `data-journey="start"` that navigates to `#notes`.
 - Notes view (hash `#notes`): `<section data-journey="notes">` containing a
@@ -640,8 +643,8 @@ free step, then click `back` expecting url `/#notes`. The demo registers
 probe `theme` in its mount call. Include a `qaOnly` step that presses Escape.
 
 `demo/journey.config.ts`: app url `http://localhost:4177`, start
-`node demo/serve.mjs 4177`, journeys `demo/journeys/*.journey.ts`, out
-`demo/out` (gitignored), variants viewport desktop and mobile and theme
+`node serve.mjs 4177`, journeys `journeys/*.journey.ts`, out `out`
+(gitignored as `demo/out`), variants viewport desktop and mobile and theme
 light and dark, `vars: { title: 'Buy milk' }`, pages `/`, `/#notes`,
 `/settings.html`.
 

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Settings - Notes demo</title>
+	<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+	<header>
+		<nav data-journey="nav" aria-label="Main">
+			<a href="/" data-journey="to-home">Home</a>
+			<a href="/#notes" data-journey="to-notes">Notes</a>
+			<a href="/settings.html" data-journey="to-settings">Settings</a>
+		</nav>
+	</header>
+	<main id="settings">
+		<h1>Settings</h1>
+		<p>
+			<label for="theme">Theme</label>
+			<select id="theme" aria-label="Theme" data-journey="theme">
+				<option value="light">light</option>
+				<option value="dark">dark</option>
+			</select>
+		</p>
+		<p>
+			<label for="token">API token</label>
+			<input id="token" type="password" aria-label="API token" data-journey="token" autocomplete="off">
+		</p>
+		<a href="/#notes" data-journey="back">Back to notes</a>
+	</main>
+	<footer><span data-testid="version">demo 1.0</span></footer>
+	<script src="/app.js"></script>
+</body>
+</html>
