@@ -111,6 +111,14 @@ function cursorPresenter(overlay: Overlay): Pick<Presenter, 'moveCursor' | 'ripp
 	};
 }
 
+const NEXT_KEYS = ['Enter', ' ', 'ArrowRight'];
+
+function editable(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) return false;
+	if (target.isContentEditable) return true;
+	return target.matches('input,textarea,select');
+}
+
 export function guidePresenter(overlay: Overlay): Presenter {
 	const cursor = cursorPresenter(overlay);
 	let onKey: ((event: KeyboardEvent) => void) | null = null;
@@ -118,10 +126,18 @@ export function guidePresenter(overlay: Overlay): Presenter {
 		if (onKey) window.removeEventListener('keydown', onKey, true);
 		onKey = null;
 	};
-	const attachKey = (exit: () => void): void => {
+	const attachKey = (exit: () => void, next: (() => void) | null): void => {
 		detachKey();
 		onKey = (event) => {
-			if (event.key === 'Escape') exit();
+			if (!event.isTrusted) return;
+			if (event.key === 'Escape') {
+				exit();
+				return;
+			}
+			if (!next || !NEXT_KEYS.includes(event.key)) return;
+			if (editable(event.target) && !overlay.host.contains(event.target as Node)) return;
+			event.preventDefault();
+			next();
 		};
 		window.addEventListener('keydown', onKey, true);
 	};
@@ -129,7 +145,7 @@ export function guidePresenter(overlay: Overlay): Presenter {
 	return {
 		show(_step, el, ctx) {
 			human = ctx.human;
-			if (ctx.human) attachKey(ctx.exit);
+			if (ctx.human || ctx.stepped) attachKey(ctx.exit, ctx.next);
 			else detachKey();
 			const { spot, card } = overlay.parts;
 			spot.classList.remove('doc');
@@ -155,10 +171,10 @@ export function guidePresenter(overlay: Overlay): Presenter {
 			hideAll(overlay);
 			overlay.track(null);
 		},
-		message(title, body, exit) {
-			attachKey(exit);
+		message(title, body, exit, next) {
+			attachKey(exit, next ?? null);
 			hideAll(overlay, ['card']);
-			fillCard(overlay.parts.card, { title, body, exit });
+			fillCard(overlay.parts.card, { title, body, exit, next });
 			overlay.track(null);
 			overlay.raise();
 		},

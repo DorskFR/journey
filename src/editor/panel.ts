@@ -1,14 +1,43 @@
 import type { Interaction, Target } from '../core/types.js';
 import type { Draft, DraftStep, StepResult } from './draft.js';
+import { describeTarget } from './runtime.js';
 
 export type { StepResult };
+
+export const EXPECT_KINDS = [
+	'visible',
+	'hidden',
+	'text',
+	'value',
+	'checked',
+	'enabled',
+	'disabled',
+	'url',
+	'count',
+] as const;
+
+export type ExpectKind = (typeof EXPECT_KINDS)[number];
+
+export interface ExpectForm {
+	index: number;
+	kind: ExpectKind;
+	target: Target | null;
+	value: string;
+	checked: boolean;
+	picking: boolean;
+}
 
 export interface PanelView {
 	draft: Draft;
 	recording: boolean;
 	running: boolean;
 	results: Record<number, StepResult>;
+	errors: Record<number, string>;
 	error: string | null;
+	status: string | null;
+	varNames: string[];
+	vars: Record<string, string>;
+	expectForm: ExpectForm | null;
 }
 
 export interface PanelActions {
@@ -22,6 +51,20 @@ export interface PanelActions {
 	capture(index: number, on: boolean): void;
 	suggestion(index: number, suggestion: number, accepted: boolean): void;
 	remove(index: number): void;
+	value(name: string, value: string): void;
+	expectOpen(index: number): void;
+	expectSet(patch: Partial<ExpectForm>): void;
+	expectPick(): void;
+	expectAdd(): void;
+	expectCancel(): void;
+}
+
+export function needsTarget(kind: ExpectKind): boolean {
+	return kind !== 'url';
+}
+
+export function needsValue(kind: ExpectKind): boolean {
+	return kind === 'text' || kind === 'value' || kind === 'count' || kind === 'url';
 }
 
 export interface Panel {
@@ -37,11 +80,18 @@ const CSS_TEXT = `
 .jp button:disabled{opacity:.5;cursor:default}
 .jp button.primary{background:#ffd166;border-color:#ffd166;font-weight:600}
 .jp button.rec{background:#d32f2f;border-color:#d32f2f;color:#fff;font-weight:600}
-.jp input[type=text]{width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font:inherit;color:#111;background:#fff}
+.jp input[type=text],.jp input[type=password],.jp input[type=number],.jp select{width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;font:inherit;color:#111;background:#fff}
 .jp .fields{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
 .jp .fields label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:#555}
 .jp .toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
 .jp .error{margin:0 0 8px;padding:6px 8px;border-radius:4px;background:#fde7e7;color:#8a1c1c;white-space:pre-wrap}
+.jp li.step .error{margin:4px 0 4px 24px;font-family:ui-monospace,monospace;font-size:12px}
+.jp .vars{margin-bottom:8px}
+.jp .vars h3{margin:0 0 4px;font-size:12px;color:#555}
+.jp .vars label{display:grid;grid-template-columns:1fr 2fr;align-items:center;gap:6px;margin-bottom:4px;font-size:12px}
+.jp .expect-form{display:grid;gap:4px;margin:4px 0 4px 24px;padding:6px;border:1px solid #e5e5e5;border-radius:4px}
+.jp .expect-form .line{display:flex;align-items:center;gap:6px}
+.jp .expect-form .target{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace;font-size:12px}
 .jp ol{list-style:none;margin:0;padding:0}
 .jp li.step{padding:8px 0;border-top:1px solid #eee}
 .jp li.step[data-result=pass]{background:#eef8ee}
@@ -88,13 +138,6 @@ function textInput(
 	return input;
 }
 
-function describeTarget(target: Target | undefined): string {
-	if (target === undefined) return '(no target)';
-	if (typeof target === 'string') return target;
-	const parts = Object.entries(target).map(([k, v]) => `${k}=${JSON.stringify(v)}`);
-	return `{ ${parts.join(', ')} }`;
-}
-
 function describeAction(step: DraftStep): string {
 	const action: Interaction = step.do ?? { kind: 'none' };
 	switch (action.kind) {
@@ -118,6 +161,59 @@ function describeAction(step: DraftStep): string {
 }
 
 const RESULT_MARK: Record<StepResult, string> = { pass: 'pass', fail: 'fail', skip: 'skip' };
+
+function expectForm(form: ExpectForm, actions: PanelActions): HTMLElement {
+	const root = el('div', { class: 'expect-form', 'data-editor': 'expect-form' });
+	const kind = el('select', { 'data-editor': 'expect-kind', 'aria-label': 'Expectation kind' });
+	for (const name of EXPECT_KINDS) kind.append(el('option', { value: name }, name));
+	kind.value = form.kind;
+	kind.addEventListener('change', () => actions.expectSet({ kind: kind.value as ExpectKind }));
+	root.append(el('div', { class: 'line' }, kind));
+	if (needsTarget(form.kind)) {
+		const pick = el('button', { type: 'button', 'data-editor': 'pick' }, 'Pick element');
+		pick.disabled = form.picking;
+		pick.addEventListener('click', actions.expectPick);
+		root.append(
+			el(
+				'div',
+				{ class: 'line' },
+				pick,
+				el(
+					'span',
+					{ class: 'target', 'data-editor': 'expect-target' },
+					form.picking ? 'Click an element on the page' : describeTarget(form.target ?? undefined),
+				),
+			),
+		);
+	}
+	if (needsValue(form.kind)) {
+		const input = el('input', {
+			type: form.kind === 'count' ? 'number' : 'text',
+			'data-editor': 'expect-value',
+			'aria-label': `Expected ${form.kind}`,
+		});
+		input.value = form.value;
+		input.addEventListener('input', () => actions.expectSet({ value: input.value }));
+		root.append(el('div', { class: 'line' }, input));
+	}
+	if (form.kind === 'checked') {
+		const box = el('input', { type: 'checkbox', 'data-editor': 'expect-checked' });
+		box.checked = form.checked;
+		box.addEventListener('change', () => actions.expectSet({ checked: box.checked }));
+		root.append(el('label', { class: 'line' }, box, ' Checked'));
+	}
+	const add = el(
+		'button',
+		{ type: 'button', 'data-editor': 'expect-add', class: 'primary' },
+		'Add',
+	);
+	add.disabled = needsTarget(form.kind) && form.target === null;
+	add.addEventListener('click', actions.expectAdd);
+	const cancel = el('button', { type: 'button', 'data-editor': 'expect-cancel' }, 'Cancel');
+	cancel.addEventListener('click', actions.expectCancel);
+	root.append(el('div', { class: 'line' }, add, cancel));
+	return root;
+}
 
 function stepRow(
 	step: DraftStep,
@@ -194,7 +290,23 @@ function stepRow(
 	const capture = el('input', { type: 'checkbox', 'data-editor': 'capture' });
 	capture.checked = step.capture !== undefined;
 	capture.addEventListener('change', () => actions.capture(index, capture.checked));
-	li.append(el('div', { class: 'opts' }, el('label', {}, capture, ' Capture')));
+	const failure = view.errors[index];
+	if (failure !== undefined) {
+		li.append(el('p', { class: 'error', 'data-editor': 'error' }, failure));
+	}
+	const addExpect = el(
+		'button',
+		{
+			type: 'button',
+			'data-editor': 'add-expect',
+			'aria-label': `Add expectation to step ${index + 1}`,
+		},
+		'Add expectation',
+	);
+	addExpect.disabled = view.expectForm !== null;
+	addExpect.addEventListener('click', () => actions.expectOpen(index));
+	li.append(el('div', { class: 'opts' }, el('label', {}, capture, ' Capture'), addExpect));
+	if (view.expectForm?.index === index) li.append(expectForm(view.expectForm, actions));
 	if (step.suggestions.length > 0) {
 		const list = el('ul', { class: 'expect', 'aria-label': `Step ${index + 1} expectations` });
 		step.suggestions.forEach((s, j) => {
@@ -242,12 +354,14 @@ export function createPanel(container: HTMLElement, actions: PanelActions): Pane
 		{ type: 'button', 'data-editor': 'toggle', 'aria-expanded': 'true' },
 		'Hide',
 	);
-	toggle.addEventListener('click', () => {
-		open = !open;
+	let status: string | null = null;
+	const setOpen = (next: boolean): void => {
+		open = next;
 		body.hidden = !open;
-		toggle.textContent = open ? 'Hide' : 'Show';
+		toggle.textContent = open ? 'Hide' : (status ?? 'Show');
 		toggle.setAttribute('aria-expanded', String(open));
-	});
+	};
+	toggle.addEventListener('click', () => setOpen(!open));
 	const wrapper = el('div', { class: 'jp', role: 'region', 'aria-label': 'Journey editor' });
 	wrapper.append(el('header', {}, el('strong', {}, 'Journey editor'), toggle), body);
 	container.append(style, wrapper);
@@ -257,59 +371,71 @@ export function createPanel(container: HTMLElement, actions: PanelActions): Pane
 		name: string,
 		cls: string,
 		onClick: () => void,
-		disabled: boolean,
 	): HTMLButtonElement => {
 		const b = el('button', { type: 'button', 'data-editor': name, class: cls }, label);
-		b.disabled = disabled;
 		b.addEventListener('click', onClick);
 		return b;
 	};
 
+	const collapseThen = (action: () => void) => (): void => {
+		setOpen(false);
+		action();
+	};
+
+	const idInput = textInput({ 'data-editor': 'id' }, '', (v) => actions.field('id', v));
+	const titleInput = textInput({ 'data-editor': 'title' }, '', (v) => actions.field('title', v));
+	const fields = el('div', { class: 'fields' });
+	fields.append(el('label', {}, 'Id', idInput), el('label', {}, 'Title', titleInput));
+	const record = button('Record', 'record', 'primary', actions.record);
+	const stop = button('Stop', 'stop', 'rec', actions.stop);
+	const preview = button('Preview', 'preview', '', collapseThen(actions.preview));
+	const run = button('Run', 'run', '', collapseThen(actions.run));
+	const exportButton = button('Export', 'export', '', actions.export);
+	const toolbar = el('div', { class: 'toolbar' }, record, stop, preview, run, exportButton);
+	const content = el('div', {});
+	body.append(fields, toolbar, content);
+
 	return {
 		render(view) {
-			body.replaceChildren();
+			status = view.status;
+			setOpen(open);
 			const { draft } = view;
-			const fields = el('div', { class: 'fields' });
-			fields.append(
-				el(
-					'label',
-					{},
-					'Id',
-					textInput({ 'data-editor': 'id' }, draft.id, (v) => actions.field('id', v)),
-				),
-				el(
-					'label',
-					{},
-					'Title',
-					textInput({ 'data-editor': 'title' }, draft.title, (v) => actions.field('title', v)),
-				),
-			);
+			if (idInput.value !== draft.id) idInput.value = draft.id;
+			if (titleInput.value !== draft.title) titleInput.value = draft.title;
 			const busy = view.running;
-			const toolbar = el('div', { class: 'toolbar' });
-			toolbar.append(
-				view.recording
-					? button('Stop', 'stop', 'rec', actions.stop, false)
-					: button('Record', 'record', 'primary', actions.record, busy),
-				button(
-					'Preview',
-					'preview',
-					'',
-					actions.preview,
-					busy || view.recording || draft.steps.length === 0,
-				),
-				button('Run', 'run', '', actions.run, busy || view.recording || draft.steps.length === 0),
-				button('Export', 'export', '', actions.export, view.recording || draft.steps.length === 0),
-			);
-			body.append(fields, toolbar);
+			const empty = draft.steps.length === 0;
+			record.hidden = view.recording;
+			record.disabled = busy;
+			stop.hidden = !view.recording;
+			preview.disabled = busy || view.recording || empty;
+			run.disabled = busy || view.recording || empty;
+			exportButton.disabled = view.recording || empty;
+			content.replaceChildren();
 			const error = el(
 				'p',
 				{ class: 'error', 'data-editor': 'error', role: 'alert' },
 				view.error ?? '',
 			);
 			error.hidden = view.error === null;
-			body.append(error);
-			if (draft.steps.length === 0) {
-				body.append(
+			content.append(error);
+			if (view.varNames.length > 0) {
+				const vars = el('section', { class: 'vars', 'aria-label': 'Values' });
+				vars.append(el('h3', {}, 'Values'));
+				for (const name of view.varNames) {
+					const input = el('input', {
+						type: 'password',
+						'data-editor': 'var',
+						'data-name': name,
+						autocomplete: 'off',
+					});
+					input.value = view.vars[name] ?? '';
+					input.addEventListener('input', () => actions.value(name, input.value));
+					vars.append(el('label', {}, name, input));
+				}
+				content.append(vars);
+			}
+			if (empty) {
+				content.append(
 					el(
 						'p',
 						{ class: 'empty' },
@@ -322,7 +448,7 @@ export function createPanel(container: HTMLElement, actions: PanelActions): Pane
 			}
 			const list = el('ol', { 'aria-label': 'Steps' });
 			list.append(...draft.steps.map((step, i) => stepRow(step, i, view, actions)));
-			body.append(list);
+			content.append(list);
 		},
 	};
 }

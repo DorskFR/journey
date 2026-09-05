@@ -4,6 +4,7 @@ export default defineConfig({
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 1 : 0,
 	reporter: process.env.CI ? 'github' : 'list',
+	expect: { timeout: 10000 },
 	projects: [
 		{ name: 'unit', testDir: 'tests/unit', testMatch: '**/*.test.ts' },
 		{

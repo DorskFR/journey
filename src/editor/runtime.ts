@@ -1,3 +1,4 @@
+import type { Target } from '../core/types.js';
 import type * as Runtime from '../runtime/index.js';
 
 export type RuntimeGlobal = Pick<
@@ -24,4 +25,11 @@ export function currentRoute(): string {
 
 export function collapse(text: string | null | undefined): string {
 	return (text ?? '').replace(/\s+/g, ' ').trim();
+}
+
+export function describeTarget(target: Target | undefined): string {
+	if (target === undefined) return '(no target)';
+	if (typeof target === 'string') return target;
+	const parts = Object.entries(target).map(([k, v]) => `${k}=${JSON.stringify(v)}`);
+	return `{ ${parts.join(', ')} }`;
 }

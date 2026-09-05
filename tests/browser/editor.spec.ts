@@ -203,44 +203,134 @@ test('Run marks rows and Preview shows the guide card', async ({ page }) => {
 	await expect(page.locator('journey-overlay .card')).toContainText('Step 1 of 5');
 });
 
-test('a run resumes after a full navigation', async ({ page }) => {
+async function seedDraft(page: Page, draft: Draft): Promise<void> {
 	await page.goto(`${BASE}/?journey=edit`);
-	await page.evaluate(() => {
+	await page.evaluate((d) => {
 		sessionStorage.setItem(
 			'journey:draft',
-			JSON.stringify({
-				draft: {
-					id: 'settings-run',
-					title: '',
-					route: '/settings.html',
-					steps: [
-						{
-							id: 'theme',
-							route: '/settings.html',
-							target: 'theme',
-							do: { kind: 'select', value: 'dark' },
-							health: 'stable',
-							suggestions: [],
-						},
-						{
-							id: 'token',
-							target: 'token',
-							do: { kind: 'fill', value: 'secret' },
-							health: 'stable',
-							suggestions: [],
-						},
-					],
-				},
-				recording: false,
-				lastRoute: '',
-				results: {},
-			}),
+			JSON.stringify({ draft: d, recording: false, lastRoute: '', results: {} }),
 		);
-	});
+	}, draft);
 	await page.reload();
+	await page.waitForFunction(() => typeof window.__journeyEditor !== 'undefined');
+}
+
+test('a run resumes after a full navigation', async ({ page }) => {
+	await seedDraft(page, {
+		id: 'settings-run',
+		title: '',
+		route: '/settings.html',
+		steps: [
+			{
+				id: 'theme',
+				route: '/settings.html',
+				target: 'theme',
+				do: { kind: 'select', value: 'dark' },
+				health: 'stable',
+				suggestions: [],
+			},
+			{
+				id: 'token',
+				target: 'token',
+				do: { kind: 'fill', value: 'secret' },
+				health: 'stable',
+				suggestions: [],
+			},
+		],
+	});
 	await page.locator('[data-editor="run"]').click();
 	await page.waitForURL(/\/settings\.html\?journey=edit$/);
 	await expect(page.locator('[data-journey="token"]')).toHaveValue('secret');
 	await expect(page.locator('[data-editor="step"][data-result="pass"]')).toHaveCount(2);
 	expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark');
+});
+
+test('values fill masked params and are missing when cleared', async ({ page }) => {
+	await page.goto(`${BASE}/settings.html?journey=edit`);
+	await waitForEditor(page);
+	await panel(page, 'record').click();
+	await page.fill('[data-journey="token"]', 'hunter2');
+	await panel(page, 'stop').click();
+	await expect(panel(page, 'record')).toBeVisible();
+	await page.fill('[data-journey="token"]', '');
+	const value = page.locator('journey-overlay [data-editor="var"][data-name="token"]');
+	await expect(value).toHaveAttribute('type', 'password');
+	await value.fill('hunter2');
+	await panel(page, 'run').click();
+	await expect(row(page, 0)).toHaveAttribute('data-result', 'pass');
+	await expect(page.locator('[data-journey="token"]')).toHaveValue('hunter2');
+	await expect(panel(page, 'toggle')).toHaveAttribute('aria-expanded', 'false');
+	await expect(panel(page, 'toggle')).toContainText('pass 1/1');
+	expect(await page.evaluate(() => sessionStorage.getItem('journey:vars'))).toBe(
+		JSON.stringify({ token: 'hunter2' }),
+	);
+	expect(await page.evaluate(() => sessionStorage.getItem('journey:draft'))).not.toContain(
+		'hunter2',
+	);
+
+	await panel(page, 'toggle').click();
+	await expect(panel(page, 'toggle')).toHaveAttribute('aria-expanded', 'true');
+	await value.fill('');
+	await panel(page, 'run').click();
+	await expect(row(page, 0)).toHaveAttribute('data-result', 'fail');
+	await expect(row(page, 0).locator('[data-editor="error"]')).toContainText('var.token');
+	await expect(panel(page, 'toggle')).toContainText('fail 0/1');
+});
+
+test('the picker adds an expectation from a clicked element', async ({ page }) => {
+	await recordCreateNote(page);
+	await row(page, 4).locator('[data-editor="add-expect"]').click();
+	const form = row(page, 4).locator('[data-editor="expect-form"]');
+	await expect(form).toBeVisible();
+	await form.locator('[data-editor="expect-kind"]').selectOption('visible');
+	await page.evaluate(() => {
+		void window.__journeyEditor?.pick();
+	});
+	await expect(page.locator('journey-overlay .spot')).toHaveClass(/doc/);
+	await page.click('[data-journey="notes"] h1');
+	await expect(form.locator('[data-editor="expect-target"]')).toHaveText('notes');
+	await expect(page.locator('[data-journey="note"]')).toHaveCount(4);
+	await form.locator('[data-editor="expect-add"]').click();
+	await expect(form).toHaveCount(0);
+	await expect(row(page, 4).locator('[data-editor="remove-expect"]:not([hidden])')).toHaveCount(1);
+	await page.evaluate(() => {
+		window.addEventListener('journey:export', (event) => {
+			window.__exported = (event as CustomEvent<ExportDetail>).detail;
+		});
+	});
+	await panel(page, 'export').click();
+	await page.waitForFunction(() => window.__exported !== undefined);
+	const detail = await page.evaluate(() => window.__exported as ExportDetail);
+	expect(detail.ir.steps[4]?.expect).toEqual([{ visible: 'notes' }]);
+	expect(detail.source).toContain("visible: 'notes'");
+});
+
+test('Preview steps through with Next', async ({ page }) => {
+	await seedDraft(page, {
+		id: 'stepped',
+		title: '',
+		route: '/',
+		steps: [
+			{
+				id: 'start',
+				route: '/',
+				target: 'start',
+				do: { kind: 'click' },
+				health: 'stable',
+				suggestions: [],
+			},
+			{ id: 'new', target: 'notes/new', do: { kind: 'click' }, health: 'stable', suggestions: [] },
+		],
+	});
+	await panel(page, 'preview').click();
+	await expect(panel(page, 'toggle')).toHaveAttribute('aria-expanded', 'false');
+	await expect(panel(page, 'toggle')).toContainText('running 0/2');
+	const card = page.locator('journey-overlay .card');
+	await expect(card).toContainText('Step 1 of 2');
+	await expect(card.locator('button.next')).toBeVisible();
+	await expect(card).toContainText('Step 1 of 2');
+	await page.keyboard.press('Enter');
+	await expect(card).toContainText('Step 2 of 2');
+	await expect(row(page, 0)).toHaveAttribute('data-result', 'pass');
+	await expect(panel(page, 'toggle')).toContainText('running 1/2');
 });

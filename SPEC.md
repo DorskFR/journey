@@ -287,7 +287,7 @@ interface JourneyApi {
 	register(journeys: Journey[]): void;        // validate, compile, add to the list (replaces same id)
 	list(): Array<{ id: string; title?: string; version: number }>;
 	start(id: string, opts?: { mode?: 'guide' | 'preview' | 'run'; from?: number; params?: Record<string, string> }): Promise<RunResult>;
-	                                           // guide: human actor + guide presenter; preview: dom actor + guide presenter; run: dom actor + no presenter
+	                                           // guide: human actor + guide presenter; preview: stepped actor (dom actions gated on Next, Enter, Space or ArrowRight) + guide presenter; run: dom actor + no presenter
 	stop(): void;
 	current(): { id: string; index: number } | null;
 	applyVariant(dim: string, value: string): Promise<void>;
@@ -328,11 +328,18 @@ Per step:
 
 1. If `when` names a dimension whose value differs from `variant`, skip.
 2. Attach window listeners for every `event` expectation of this step.
-3. If `route` is set and the current location does not match, ask the actor
-   to navigate (`actor.navigate(route)`). For the human actor this shows a
-   card asking the user to go there; for dom it assigns `location`; for the
-   driver it yields `{ route }` to the host. After navigation the engine
-   continues from the same step (progress is persisted before navigating).
+3. If `route` is set and the current location does not match: when the
+   previous step performed an action, wait for the route up to the step
+   timeout, the way a navigation caused by a click is awaited, and only ask
+   the actor to navigate if it never arrives. When nothing preceded the step
+   (first step, a resumed run, or an informational step before it), ask the
+   actor to navigate at once. `actor.navigate(route)`: for the human actor
+   this shows a card asking the user to go there; for dom it assigns
+   `location`, keeping the `journey` query flag; for the driver it yields
+   `{ route }` to the host. Progress records that the step forced a
+   navigation, and a resumed step that forced one already fails on the next
+   miss instead of navigating again. After navigation the engine continues
+   from the same step (progress is persisted before navigating).
 4. Resolve the target with polling every 100 ms up to `timeout`. The human
    actor has no timeout. `optional` steps skip on timeout. Ambiguity fails
    immediately with the count in the error.
@@ -478,7 +485,15 @@ suggestion has a human label.
 Panel: step rows show index, target (with a health dot: green stable, amber
 fallback, red fragile), action summary, editable `say.title` and `say.body`,
 a Capture toggle, an expectation list with checkboxes for suggestions and a
-remove button for accepted ones, and a delete button. Journey id and title
+remove button for accepted ones, an "Add expectation" form, and a delete
+button. The form takes a kind, a target picked by clicking an element in the
+page (pick mode outlines the hovered element without scrolling, Escape
+cancels), and a value prefilled from the picked element or the current
+location. A failed row shows the engine's error text. A Values section lists
+every `var.*` parameter the draft references with password inputs; values
+live in `sessionStorage['journey:vars']` only, are passed as run params, and
+never enter the draft or the export. Preview and Run collapse the panel and
+the collapsed toggle shows `running k/n`, then `pass k/n` or `fail k/n`. Journey id and title
 fields at the top. Preview runs the draft with `dom` actor and `guide`
 presenter from step 0. Run runs it with `dom` actor and `none` presenter and
 marks each row pass or fail. Export validates the draft, prints it, then
@@ -572,6 +587,8 @@ or cross.
   variant with presenter `none` at smoke level, prints a table with pass
   or fail and the number of fallback and fragile targets, exit 1 on failure.
   `--strict` also fails when any target is not `stable`.
+- Config `vars` are merged with the JSON object in the `JOURNEY_VARS`
+  environment variable when set, so secrets never have to be written down.
 - `test [playwright args...]`: spawns `npx playwright test -c <dist>/playwright/journeys.config.js`
   with `JOURNEY_CONFIG` set to the absolute config path, forwarding extra
   args and the exit code.

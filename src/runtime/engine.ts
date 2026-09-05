@@ -29,11 +29,13 @@ export interface ActorCtx {
 	presenter: Presenter;
 	params: Params;
 	exit: () => void;
+	proceed: () => void;
 	markActed: () => void;
 }
 
 export interface Actor {
 	human?: boolean;
+	stepped?: boolean;
 	navigate(route: string, ctx: ActorCtx): Promise<void>;
 	perform(step: IRStep, el: Element | null, action: Interaction, ctx: ActorCtx): Promise<void>;
 	resume?(step: IRStep, ctx: ActorCtx): Promise<void>;
@@ -47,6 +49,7 @@ export interface ShowCtx {
 	body?: string;
 	action: Interaction;
 	human: boolean;
+	stepped: boolean;
 	next: (() => void) | null;
 	exit: () => void;
 }
@@ -55,13 +58,13 @@ export interface Presenter {
 	show(step: IRStep, el: Element | null, ctx: ShowCtx): void;
 	settle(step: IRStep): void | Promise<void>;
 	hide(): void;
-	message?(title: string, body: string, exit: () => void): void;
+	message?(title: string, body: string, exit: () => void, next?: () => void): void;
 	moveCursor?(el: Element): Promise<void>;
 	ripple?(el: Element): void;
 }
 
 export interface ProgressSink {
-	save(index: number, acted: boolean): void;
+	save(index: number, acted: boolean, navigated?: boolean): void;
 	clear(): void;
 }
 
@@ -93,7 +96,6 @@ export type EngineEvent =
 export type Listener = (data: Record<string, unknown>) => void;
 
 export const POLL_INTERVAL = 100;
-export const ROUTE_GRACE = 2000;
 
 class AbortError extends Error {
 	constructor() {
@@ -403,7 +405,7 @@ export class Engine {
 		return Object.entries(step.when ?? {}).some(([dim, value]) => this.deps.variant[dim] !== value);
 	}
 
-	async run(from = 0, resume: { acted?: boolean } = {}): Promise<RunResult> {
+	async run(from = 0, resume: { acted?: boolean; navigated?: boolean } = {}): Promise<RunResult> {
 		if (this.running) throw new Error('Engine is already running');
 		this.running = true;
 		this.exitRequested = false;
@@ -412,8 +414,12 @@ export class Engine {
 		const result: RunResult = { ok: true, completed: 0, failures: [] };
 		const steps = this.ir.steps;
 		const exit = (): void => this.stop();
+		// Listeners attached right after start() must see the first events, even when the run fails synchronously.
+		await Promise.resolve();
 		this.emit('journey:start', { from });
 		let acted = resume.acted === true;
+		let navigated = resume.navigated === true;
+		let lastAction: Interaction['kind'] | null = null;
 		try {
 			for (let i = from; i < steps.length; i++) {
 				const step = steps[i] as IRStep;
@@ -431,6 +437,7 @@ export class Engine {
 					presenter,
 					params: this.deps.params,
 					exit,
+					proceed: nextDeferred.resolve,
 					markActed: () => progress?.save(i, true),
 				};
 				try {
@@ -444,16 +451,21 @@ export class Engine {
 						body: this.text(step.say?.body),
 						action,
 						human: actor.human === true,
-						next: step.guide === 'next' ? nextDeferred.resolve : null,
+						stepped: actor.stepped === true,
+						next: step.guide === 'next' || actor.stepped ? nextDeferred.resolve : null,
 						exit,
 					};
 					if (!acted) {
 						if (step.route !== undefined && !matchesRoute(step.route)) {
 							const route = step.route;
 							const onRoute = (): true | undefined => (matchesRoute(route) ? true : undefined);
-							const settled = await this.poll(onRoute, Math.min(ROUTE_GRACE, step.timeout));
+							const inFlight = lastAction !== null && lastAction !== 'none';
+							const settled = inFlight ? await this.poll(onRoute, step.timeout) : undefined;
 							if (settled !== true) {
-								progress?.save(i, false);
+								if (navigated)
+									throw new Error(`route ${route}: ${currentUrl(route)} after navigating`);
+								navigated = true;
+								progress?.save(i, false, true);
 								await this.race(actor.navigate(route, ctx));
 								const arrived = await this.poll(onRoute, actor.human ? null : step.timeout);
 								if (arrived !== true) throw new Error(`route ${route}: ${currentUrl(route)}`);
@@ -483,6 +495,8 @@ export class Engine {
 					await this.race(Promise.resolve(presenter.settle(step)));
 					await sleep(pace?.afterSettle ?? 0, this.signal);
 					result.completed += 1;
+					lastAction = step.do.kind;
+					navigated = false;
 					const capture: Capture | null = step.capture ?? null;
 					this.emit('step:pass', { ...stepData, capture });
 					progress?.save(i + 1, false);

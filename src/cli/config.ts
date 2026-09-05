@@ -18,13 +18,29 @@ export function configPath(path?: string): string {
 	return resolve(path ?? process.env.JOURNEY_CONFIG ?? DEFAULT_CONFIG);
 }
 
+export function envVars(raw = process.env.JOURNEY_VARS): Record<string, string> {
+	if (!raw) return {};
+	const parsed: unknown = JSON.parse(raw);
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		throw new Error('journey: JOURNEY_VARS must be a JSON object');
+	}
+	const out: Record<string, string> = {};
+	for (const [key, value] of Object.entries(parsed)) out[key] = String(value);
+	return out;
+}
+
+export function withEnvVars(config: Config, env = envVars()): Config {
+	if (Object.keys(env).length === 0) return config;
+	return { ...config, vars: { ...config.vars, ...env } };
+}
+
 export async function loadConfig(path?: string): Promise<LoadedConfig> {
 	const abs = configPath(path);
 	const config = importDefault<Config>(await import(pathToFileURL(abs).href));
 	if (!config || typeof config !== 'object') {
 		throw new Error(`journey: ${abs} has no default export`);
 	}
-	return { config, path: abs, dir: dirname(abs) };
+	return { config: withEnvVars(config), path: abs, dir: dirname(abs) };
 }
 
 export function resolveFrom(loaded: LoadedConfig, path: string): string {

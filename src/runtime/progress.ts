@@ -11,6 +11,7 @@ export interface Progress {
 	variant: Record<string, string>;
 	ir: IR;
 	acted?: boolean;
+	navigated?: boolean;
 }
 
 export function readProgress(): Progress | null {

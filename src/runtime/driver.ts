@@ -55,6 +55,7 @@ interface Session {
 	result: RunResult | null;
 	from: number;
 	acted: boolean;
+	navigated: boolean;
 	yielded: DriverYield | null;
 	settled: SettleResult | null;
 	awaitingSettle: boolean;
@@ -137,7 +138,7 @@ export function createDriver(host: DriverHost): Driver {
 				masks: opts.masks,
 				track: host.track,
 				progress: {
-					save(index, acted) {
+					save(index, acted, navigated) {
 						writeProgress({
 							id: ir.id,
 							version: ir.version,
@@ -147,6 +148,7 @@ export function createDriver(host: DriverHost): Driver {
 							variant: opts.variant,
 							ir,
 							acted,
+							navigated,
 						});
 					},
 					clear: clearProgress,
@@ -159,6 +161,7 @@ export function createDriver(host: DriverHost): Driver {
 				result: null,
 				from,
 				acted: resumed?.acted === true,
+				navigated: resumed?.navigated === true,
 				yielded: null,
 				settled: null,
 				awaitingSettle: false,
@@ -197,7 +200,7 @@ export function createDriver(host: DriverHost): Driver {
 			if (s.awaitingSettle) return fail('call settle() before the next step()');
 			if (s.result) return Promise.resolve({ done: true, result: s.result });
 			if (!s.run) {
-				s.run = s.engine.run(s.from, { acted: s.acted }).then((result) => {
+				s.run = s.engine.run(s.from, { acted: s.acted, navigated: s.navigated }).then((result) => {
 					s.result = result;
 					host.onEngine?.(null);
 					deliverStep(s);

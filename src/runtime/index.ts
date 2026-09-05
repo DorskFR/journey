@@ -1,7 +1,7 @@
 import { compile } from '../core/compile.js';
 import type { IR, Journey, Text } from '../core/types.js';
 import { VERSION } from '../version.js';
-import { domActor, humanActor } from './actors.js';
+import { domActor, humanActor, steppedActor } from './actors.js';
 import { createDriver, MODE as DRIVER_MODE, type Driver } from './driver.js';
 import { Engine, type Presenter, type RunResult } from './engine.js';
 import { createOverlay, type Overlay } from './overlay.js';
@@ -122,7 +122,11 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		},
 	});
 
-	async function startRun(id: string, opts: StartOptions, acted: boolean): Promise<RunResult> {
+	async function startRun(
+		id: string,
+		opts: StartOptions,
+		resume: { acted: boolean; navigated: boolean },
+	): Promise<RunResult> {
 		const ir = journeys.get(id);
 		if (!ir) throw new Error(`journey "${id}" is not registered`);
 		if (engine) engine.stop();
@@ -131,7 +135,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		const params: Params = { ...opts.params };
 		for (const [dim, value] of Object.entries(variant)) params[`variant.${dim}`] = value;
 		const run = new Engine(ir, {
-			actor: mode === 'guide' ? humanActor : domActor,
+			actor: mode === 'guide' ? humanActor : mode === 'preview' ? steppedActor : domActor,
 			presenter: mode === 'run' ? nonePresenter : guidePresenter(overlay),
 			params,
 			variant,
@@ -139,8 +143,18 @@ export function mount(options: MountOptions = {}): JourneyApi {
 			probes: options.probes,
 			track: options.track,
 			progress: {
-				save(index, acted) {
-					writeProgress({ id, version: ir.version, index, mode, params, variant, ir, acted });
+				save(index, acted, navigated) {
+					writeProgress({
+						id,
+						version: ir.version,
+						index,
+						mode,
+						params,
+						variant,
+						ir,
+						acted,
+						navigated,
+					});
 				},
 				clear: clearProgress,
 			},
@@ -151,7 +165,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 			if (ir.autostart?.once) localStorage.setItem(doneKey(ir), '1');
 		});
 		try {
-			return await run.run(opts.from ?? 0, { acted });
+			return await run.run(opts.from ?? 0, resume);
 		} finally {
 			if (engine === run) {
 				engine = null;
@@ -161,7 +175,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 	}
 
 	function start(id: string, opts: StartOptions = {}): Promise<RunResult> {
-		return startRun(id, opts, false);
+		return startRun(id, opts, { acted: false, navigated: false });
 	}
 
 	function resume(): void {
@@ -177,7 +191,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		void startRun(
 			progress.id,
 			{ mode: progress.mode as Mode, from, params: progress.params, variant: progress.variant },
-			progress.acted === true,
+			{ acted: progress.acted === true, navigated: progress.navigated === true },
 		).catch(() => {});
 	}
 

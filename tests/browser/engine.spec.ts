@@ -129,7 +129,7 @@ test('optional steps skip when the target is missing', async ({ page }) => {
 			],
 		}),
 	]);
-	await start(page, 'optional', { mode: 'preview' });
+	await start(page, 'optional', { mode: 'run' });
 	await expect.poll(() => result(page)).toEqual({ ok: true, completed: 1, failures: [] });
 });
 
@@ -144,7 +144,7 @@ test('a failing expectation reports the observed state', async ({ page }) => {
 			],
 		}),
 	]);
-	await start(page, 'wrong', { mode: 'preview' });
+	await start(page, 'wrong', { mode: 'run' });
 	await expect
 		.poll(() => result(page))
 		.toEqual({
@@ -152,4 +152,28 @@ test('a failing expectation reports the observed state', async ({ page }) => {
 			completed: 1,
 			failures: [{ stepId: 'count', error: 'count notes/note: 3' }],
 		});
+});
+
+test('preview waits for Next before each step', async ({ page }) => {
+	await register(page, [
+		ir({
+			id: 'stepped',
+			steps: [
+				{ id: 'go', target: 'start', do: { kind: 'click' } },
+				{ id: 'new', target: 'notes/new', do: { kind: 'click' }, expect: [{ visible: 'dialog' }] },
+			],
+		}),
+	]);
+	await start(page, 'stepped', { mode: 'preview' });
+	await expect(card(page)).toContainText('Step 1 of 2');
+	await expect(card(page).locator('button.next')).toBeVisible();
+	await expect(page.locator('[data-journey="notes"]')).toBeHidden();
+	await expect(card(page)).toContainText('Step 1 of 2');
+	await page.keyboard.press('Enter');
+	await expect(card(page)).toContainText('Step 2 of 2');
+	await expect(page.locator('[data-journey="notes"]')).toBeVisible();
+	await expect(page.locator('[data-journey="dialog"]')).toBeHidden();
+	await card(page).locator('button.next').click();
+	await expect.poll(() => result(page)).toEqual({ ok: true, completed: 2, failures: [] });
+	await expect(page.locator('[data-journey="dialog"]')).toBeVisible();
 });

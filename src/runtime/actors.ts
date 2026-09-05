@@ -136,6 +136,24 @@ export const domActor: Actor = {
 	},
 };
 
+export const steppedActor: Actor = {
+	stepped: true,
+	async navigate(route, ctx) {
+		ctx.presenter.message?.(
+			'Go to another page',
+			`Press Next to open ${route}.`,
+			ctx.exit,
+			ctx.proceed,
+		);
+		await ctx.next;
+		if (!ctx.signal.aborted) await domActor.navigate(route, ctx);
+	},
+	async perform(step, el, action, ctx) {
+		await ctx.next;
+		if (!ctx.signal.aborted) await domActor.perform(step, el, action, ctx);
+	},
+};
+
 export const humanActor: Actor = {
 	human: true,
 	async navigate(route, ctx) {

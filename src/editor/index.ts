@@ -1,4 +1,4 @@
-import type { Interaction, Journey } from '../core/types.js';
+import type { Expectation, Interaction, Journey, Target } from '../core/types.js';
 import { validate } from '../core/validate.js';
 import type { Engine } from '../runtime/engine.js';
 import type { JourneyApi } from '../runtime/index.js';
@@ -16,8 +16,17 @@ import {
 import { exportDraft, toJourney } from './export.js';
 import { type Located, locate } from './locate.js';
 import { createObserver } from './observe.js';
-import { createPanel, type PanelView, type StepResult } from './panel.js';
-import { currentRoute, useRuntime } from './runtime.js';
+import {
+	createPanel,
+	type ExpectForm,
+	type ExpectKind,
+	needsTarget,
+	type PanelView,
+	type StepResult,
+} from './panel.js';
+import { pickElement } from './pick.js';
+import { collapse, currentRoute, describeTarget, useRuntime } from './runtime.js';
+import { readVars, varNames, varParams, writeVars } from './vars.js';
 
 export { digest, suggest } from './digest.js';
 export type { Draft, DraftStep, Suggestion } from './draft.js';
@@ -30,6 +39,52 @@ export interface EditorApi {
 	record(): void;
 	stop(): void;
 	reset(): void;
+	pick(): Promise<Target | null>;
+}
+
+type Outcome = 'pass' | 'fail' | 'stopped';
+
+function buildExpectation(form: ExpectForm, target: Target | null): Expectation | null {
+	const { kind, value } = form;
+	if (kind === 'url') return value === '' ? null : { url: value };
+	if (target === null) return null;
+	switch (kind) {
+		case 'visible':
+			return { visible: target };
+		case 'hidden':
+			return { hidden: target };
+		case 'enabled':
+			return { enabled: target };
+		case 'disabled':
+			return { disabled: target };
+		case 'text':
+			return { text: [target, value] };
+		case 'value':
+			return { value: [target, value] };
+		case 'checked':
+			return { checked: [target, form.checked] };
+		case 'count': {
+			const n = Number.parseInt(value, 10);
+			return Number.isNaN(n) ? null : { count: [target, { equals: n }] };
+		}
+	}
+}
+
+function labelFor(kind: ExpectKind, target: Target | null, form: ExpectForm): string {
+	if (kind === 'url') return `URL is ${form.value}`;
+	const name = describeTarget(target ?? undefined);
+	switch (kind) {
+		case 'text':
+			return `${name} shows ${JSON.stringify(form.value)}`;
+		case 'value':
+			return `${name} value is ${JSON.stringify(form.value)}`;
+		case 'checked':
+			return `${name} is ${form.checked ? 'checked' : 'unchecked'}`;
+		case 'count':
+			return `${name} count is ${form.value}`;
+		default:
+			return `${name} is ${kind}`;
+	}
 }
 
 declare global {
@@ -56,7 +111,11 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 	let recording = false;
 	let running = false;
 	let results: Record<number, StepResult> = restored?.results ?? {};
+	let errors: Record<number, string> = {};
+	let outcome: Outcome | null = null;
 	let error: string | null = null;
+	let vars = readVars();
+	let expectForm: ExpectForm | null = null;
 
 	let pendingDigest: {
 		step: DraftStep;
@@ -132,28 +191,43 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		if (!built) return;
 		running = true;
 		results = {};
+		errors = {};
+		outcome = null;
 		render();
 		api.register([built]);
-		const done = api.start(draft.id, { mode });
+		const done = api.start(draft.id, { mode, params: varParams(vars) });
 		attach(api.engine());
 		done.catch((e: unknown) => {
 			error = e instanceof Error ? e.message : String(e);
-			finish();
+			finish('fail');
 		});
 	};
 
-	const finish = (): void => {
+	const finish = (result: Outcome): void => {
 		running = false;
+		outcome = result;
 		render();
 	};
 
 	const attach = (engine: Engine | null): void => {
 		if (!engine) return;
 		engine.on('step:pass', (data) => mark(data, 'pass'));
-		engine.on('step:fail', (data) => mark(data, 'fail'));
+		engine.on('step:fail', (data) => {
+			if (typeof data.index === 'number' && typeof data.error === 'string') {
+				errors[data.index] = data.error;
+			}
+			mark(data, 'fail');
+		});
 		engine.on('step:skip', (data) => mark(data, 'skip'));
-		engine.on('journey:done', finish);
-		engine.on('journey:abort', finish);
+		engine.on('journey:done', (data) => finish(data.ok === false ? 'fail' : 'pass'));
+		engine.on('journey:abort', () => finish('stopped'));
+	};
+
+	const status = (): string | null => {
+		if (!running && outcome === null) return null;
+		const total = draft.steps.length;
+		const done = Object.values(results).filter((r) => r !== 'fail').length;
+		return `${running ? 'running' : outcome} ${done}/${total}`;
 	};
 
 	const resumeRun = (): void => {
@@ -171,6 +245,35 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 	const mark = (data: Record<string, unknown>, result: StepResult): void => {
 		if (typeof data.index === 'number') results[data.index] = result;
 		render();
+	};
+
+	const closeExpect = (): void => {
+		expectForm = null;
+		render();
+	};
+
+	const prefill = (form: ExpectForm, el: Element, target: Target): void => {
+		form.target = target;
+		if (form.kind === 'text') form.value = collapse(el.textContent);
+		if (form.kind === 'value') form.value = (el as HTMLInputElement).value ?? '';
+		if (form.kind === 'checked') form.checked = (el as HTMLInputElement).checked === true;
+		if (form.kind === 'count') form.value = String(api.resolve.resolveAll(target).length);
+	};
+
+	const pick = async (): Promise<Target | null> => {
+		if (expectForm?.picking) return null;
+		if (expectForm) expectForm.picking = true;
+		render();
+		const el = await pickElement(api.overlay);
+		if (expectForm) expectForm.picking = false;
+		if (!el) {
+			render();
+			return null;
+		}
+		const located = locate(el);
+		if (expectForm && needsTarget(expectForm.kind)) prefill(expectForm, located.el, located.target);
+		render();
+		return located.target;
 	};
 
 	const buildJourney = (): Journey | null => {
@@ -223,12 +326,69 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		remove(index) {
 			draft.steps.splice(index, 1);
 			results = {};
+			errors = {};
+			expectForm = null;
 			render();
 		},
+		value(name, value) {
+			if (value === '') delete vars[name];
+			else vars[name] = value;
+			writeVars(vars);
+		},
+		expectOpen(index) {
+			stopRecording();
+			expectForm = {
+				index,
+				kind: 'visible',
+				target: null,
+				value: '',
+				checked: false,
+				picking: false,
+			};
+			render();
+		},
+		expectSet(patch) {
+			if (!expectForm) return;
+			const kindChanged = patch.kind !== undefined && patch.kind !== expectForm.kind;
+			Object.assign(expectForm, patch);
+			if (kindChanged) {
+				expectForm.target = null;
+				expectForm.value = expectForm.kind === 'url' ? currentRoute() : '';
+				expectForm.checked = false;
+			}
+			render();
+		},
+		expectPick() {
+			void pick();
+		},
+		expectAdd() {
+			if (!expectForm) return;
+			const step = draft.steps[expectForm.index];
+			const expectation = buildExpectation(expectForm, expectForm.target);
+			if (!step || !expectation) return;
+			step.suggestions.push({
+				label: labelFor(expectForm.kind, expectForm.target, expectForm),
+				expectation,
+				accepted: true,
+			});
+			closeExpect();
+		},
+		expectCancel: closeExpect,
 	});
 
 	function render(): void {
-		const view: PanelView = { draft, recording, running, results, error };
+		const view: PanelView = {
+			draft,
+			recording,
+			running,
+			results,
+			errors,
+			error,
+			status: status(),
+			varNames: varNames(draft),
+			vars,
+			expectForm,
+		};
 		panel.render(view);
 		persist();
 	}
@@ -242,9 +402,15 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 			stopRecording();
 			draft = emptyDraft();
 			results = {};
+			errors = {};
+			outcome = null;
 			error = null;
+			expectForm = null;
+			vars = {};
+			writeVars(vars);
 			render();
 		},
+		pick,
 	};
 	mounted = editor;
 	window.__journeyEditor = editor;

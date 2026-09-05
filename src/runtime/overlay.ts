@@ -16,7 +16,7 @@ export interface Overlay {
 	raise(): void;
 	remove(): void;
 	target(): DOMRect | null;
-	track(el: Element | null): void;
+	track(el: Element | null, options?: { scroll?: boolean }): void;
 	layout(): void;
 }
 
@@ -185,9 +185,9 @@ class OverlayImpl implements Overlay {
 		return rect.width === 0 && rect.height === 0 ? null : rect;
 	}
 
-	track(el: Element | null): void {
+	track(el: Element | null, options: { scroll?: boolean } = {}): void {
 		this.current = el;
-		if (el) el.scrollIntoView({ block: 'center', inline: 'nearest' });
+		if (el && options.scroll !== false) el.scrollIntoView({ block: 'center', inline: 'nearest' });
 		this.layout();
 	}
 
