@@ -62,7 +62,10 @@ function assignRoute(route: string): void {
 		location.hash = route.slice(hash);
 		return;
 	}
-	location.href = route;
+	const url = new URL(route, location.href);
+	const flag = new URLSearchParams(location.search).get('journey');
+	if (flag !== null && !url.searchParams.has('journey')) url.searchParams.set('journey', flag);
+	location.href = url.href;
 }
 
 export const domActor: Actor = {

@@ -93,6 +93,7 @@ export type EngineEvent =
 export type Listener = (data: Record<string, unknown>) => void;
 
 export const POLL_INTERVAL = 100;
+export const ROUTE_GRACE = 2000;
 
 class AbortError extends Error {
 	constructor() {
@@ -448,14 +449,15 @@ export class Engine {
 					};
 					if (!acted) {
 						if (step.route !== undefined && !matchesRoute(step.route)) {
-							progress?.save(i, false);
-							await this.race(actor.navigate(step.route, ctx));
 							const route = step.route;
-							const arrived = await this.poll(
-								() => (matchesRoute(route) ? true : undefined),
-								actor.human ? null : step.timeout,
-							);
-							if (arrived !== true) throw new Error(`route ${route}: ${currentUrl(route)}`);
+							const onRoute = (): true | undefined => (matchesRoute(route) ? true : undefined);
+							const settled = await this.poll(onRoute, Math.min(ROUTE_GRACE, step.timeout));
+							if (settled !== true) {
+								progress?.save(i, false);
+								await this.race(actor.navigate(route, ctx));
+								const arrived = await this.poll(onRoute, actor.human ? null : step.timeout);
+								if (arrived !== true) throw new Error(`route ${route}: ${currentUrl(route)}`);
+							}
 						}
 						progress?.save(i, false);
 						const el = await this.resolveTarget(step, params);

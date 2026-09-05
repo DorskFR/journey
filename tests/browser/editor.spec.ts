@@ -202,3 +202,45 @@ test('Run marks rows and Preview shows the guide card', async ({ page }) => {
 	await panel(page, 'preview').click();
 	await expect(page.locator('journey-overlay .card')).toContainText('Step 1 of 5');
 });
+
+test('a run resumes after a full navigation', async ({ page }) => {
+	await page.goto(`${BASE}/?journey=edit`);
+	await page.evaluate(() => {
+		sessionStorage.setItem(
+			'journey:draft',
+			JSON.stringify({
+				draft: {
+					id: 'settings-run',
+					title: '',
+					route: '/settings.html',
+					steps: [
+						{
+							id: 'theme',
+							route: '/settings.html',
+							target: 'theme',
+							do: { kind: 'select', value: 'dark' },
+							health: 'stable',
+							suggestions: [],
+						},
+						{
+							id: 'token',
+							target: 'token',
+							do: { kind: 'fill', value: 'secret' },
+							health: 'stable',
+							suggestions: [],
+						},
+					],
+				},
+				recording: false,
+				lastRoute: '',
+				results: {},
+			}),
+		);
+	});
+	await page.reload();
+	await page.locator('[data-editor="run"]').click();
+	await page.waitForURL(/\/settings\.html\?journey=edit$/);
+	await expect(page.locator('[data-journey="token"]')).toHaveValue('secret');
+	await expect(page.locator('[data-editor="step"][data-result="pass"]')).toHaveCount(2);
+	expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark');
+});

@@ -1,7 +1,7 @@
 import type { Interaction, Target } from '../core/types.js';
-import type { Draft, DraftStep } from './draft.js';
+import type { Draft, DraftStep, StepResult } from './draft.js';
 
-export type StepResult = 'pass' | 'fail' | 'skip';
+export type { StepResult };
 
 export interface PanelView {
 	draft: Draft;

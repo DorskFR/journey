@@ -1,6 +1,8 @@
 import type { Interaction, Journey } from '../core/types.js';
 import { validate } from '../core/validate.js';
+import type { Engine } from '../runtime/engine.js';
 import type { JourneyApi } from '../runtime/index.js';
+import { readProgress } from '../runtime/progress.js';
 import { type Digest, digest, suggest } from './digest.js';
 import {
 	type Draft,
@@ -53,7 +55,7 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 	let draft: Draft = restored?.draft ?? emptyDraft();
 	let recording = false;
 	let running = false;
-	let results: Record<number, StepResult> = {};
+	let results: Record<number, StepResult> = restored?.results ?? {};
 	let error: string | null = null;
 
 	let pendingDigest: {
@@ -72,7 +74,7 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		render();
 	};
 
-	const persist = (): void => writeState({ draft, recording, lastRoute: currentRoute() });
+	const persist = (): void => writeState({ draft, recording, lastRoute: currentRoute(), results });
 
 	const observer = createObserver<Prepared>({
 		ignore: (event) => event.composedPath().includes(api.overlay.host),
@@ -133,18 +135,37 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		render();
 		api.register([built]);
 		const done = api.start(draft.id, { mode });
-		const engine = api.engine();
-		engine?.on('step:pass', (data) => mark(data, 'pass'));
-		engine?.on('step:fail', (data) => mark(data, 'fail'));
-		engine?.on('step:skip', (data) => mark(data, 'skip'));
-		done
-			.catch((e: unknown) => {
-				error = e instanceof Error ? e.message : String(e);
-			})
-			.finally(() => {
-				running = false;
-				render();
-			});
+		attach(api.engine());
+		done.catch((e: unknown) => {
+			error = e instanceof Error ? e.message : String(e);
+			finish();
+		});
+	};
+
+	const finish = (): void => {
+		running = false;
+		render();
+	};
+
+	const attach = (engine: Engine | null): void => {
+		if (!engine) return;
+		engine.on('step:pass', (data) => mark(data, 'pass'));
+		engine.on('step:fail', (data) => mark(data, 'fail'));
+		engine.on('step:skip', (data) => mark(data, 'skip'));
+		engine.on('journey:done', finish);
+		engine.on('journey:abort', finish);
+	};
+
+	const resumeRun = (): void => {
+		const progress = readProgress();
+		if (!progress || progress.id !== draft.id || progress.mode === 'driver') return;
+		if (draft.steps.length === 0) return;
+		const built = buildJourney();
+		if (!built) return;
+		running = true;
+		api.register([built]);
+		attach(api.engine());
+		render();
 	};
 
 	const mark = (data: Record<string, unknown>, result: StepResult): void => {
@@ -228,6 +249,7 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 	mounted = editor;
 	window.__journeyEditor = editor;
 	render();
+	resumeRun();
 	if (restored?.recording) {
 		startRecording();
 		const route = currentRoute();

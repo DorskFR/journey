@@ -19,10 +19,13 @@ export interface Draft {
 	steps: DraftStep[];
 }
 
+export type StepResult = 'pass' | 'fail' | 'skip';
+
 export interface DraftState {
 	draft: Draft;
 	recording: boolean;
 	lastRoute: string;
+	results: Record<number, StepResult>;
 }
 
 export const STORAGE_KEY = 'journey:draft';
@@ -41,6 +44,7 @@ export function readState(): DraftState | null {
 			draft: { ...emptyDraft(), ...parsed.draft },
 			recording: parsed.recording === true,
 			lastRoute: typeof parsed.lastRoute === 'string' ? parsed.lastRoute : '',
+			results: parsed.results ?? {},
 		};
 	} catch {
 		return null;
