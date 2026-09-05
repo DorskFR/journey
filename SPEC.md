@@ -277,6 +277,7 @@ returns and installs `window.__journey`:
 
 ```ts
 interface JourneyApi {
+	register(journeys: Journey[]): void;        // validate, compile, add to the list (replaces same id)
 	list(): Array<{ id: string; title?: string; version: number }>;
 	start(id: string, opts?: { mode?: 'guide' | 'preview'; from?: number; params?: Record<string, string> }): Promise<RunResult>;
 	stop(): void;
@@ -287,7 +288,21 @@ interface JourneyApi {
 	overlay: Overlay;
 	version: string;
 }
+
+interface Overlay {
+	host: HTMLElement;                         // the <journey-overlay> element
+	root: ShadowRoot;
+	parts: Record<'spot' | 'card' | 'cursor' | 'toast' | 'caption' | 'badge' | 'panel', HTMLElement>;
+	raise(): void;
+	remove(): void;
+	target(): DOMRect | null;                  // rect of the element currently shown
+}
 ```
+
+`mount` may run before `document.body` exists (init scripts run at document
+start): the overlay is created lazily on first use or after `DOMContentLoaded`.
+The IIFE bundle only defines the `journeyRuntime` global; it never mounts by
+itself.
 
 Also: a delegated click listener on `[data-journey-start]` calls
 `start(value)`. `autostart` journeys start in guide mode when the current
@@ -682,7 +697,12 @@ Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
   check `document.elementFromPoint` at the dialog's centre is the overlay
   host); progress resumes after `page.reload()`; `optional` step skips;
   failing expectation reports the observed state.
-- `driver.spec.ts`: `runJourney` runs `create-note` on desktop and mobile
+- `protocol.spec.ts` (runtime milestone): drives `window.__journey.driver`
+  from the test with `page.evaluate` and performs the returned actions with
+  Playwright locators on the marker, through `create-note` and through the
+  `settings-theme` full navigation, asserting the sequence of `step` and
+  `settle` results including captures and a failure message.
+- `driver.spec.ts` (Playwright milestone): `runJourney` runs `create-note` on desktop and mobile
   with trusted input, returns ok, honours a full navigation to
   `settings.html` and back, captures are reported in order, a journey with
   a wrong expectation fails with the step id, masks are applied in book mode
