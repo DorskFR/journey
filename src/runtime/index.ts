@@ -51,7 +51,10 @@ export interface MountOptions {
 	strings?: StringsOption;
 	navigate?: NavigateHook;
 	storage?: JourneyStorage;
+	presenter?: Presenter | ((name: PresenterName) => Presenter);
 }
+
+export type PresenterName = 'none' | 'doc' | 'guide';
 
 export interface StartOptions {
 	mode?: Mode;
@@ -143,10 +146,16 @@ export function mount(options: MountOptions = {}): JourneyApi {
 	const strings = (): Strings => resolveStrings(options.strings, currentLocale(currentVariant));
 	const t = translator(strings);
 
-	const presenterFor = (name: 'none' | 'doc' | 'guide'): Presenter => {
+	const builtin = (name: PresenterName): Presenter => {
 		if (name === 'doc') return docPresenter(overlay, t);
 		if (name === 'guide') return guidePresenter(overlay, t);
 		return nonePresenter;
+	};
+	const presenterFor = (name: PresenterName): Presenter => {
+		const custom = options.presenter;
+		if (typeof custom === 'function') return custom(name);
+		if (custom && name !== 'none') return custom;
+		return builtin(name);
 	};
 
 	const driver = createDriver({
@@ -180,7 +189,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 					: mode === 'preview'
 						? localized(steppedActor, t)
 						: domActor,
-			presenter: mode === 'run' ? nonePresenter : guidePresenter(overlay, t),
+			presenter: presenterFor(mode === 'run' ? 'none' : 'guide'),
 			params,
 			variant,
 			translate: options.translate,

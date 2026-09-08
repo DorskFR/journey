@@ -149,6 +149,57 @@ mount({
 Bumping a journey's `version` already invalidates a stale resume and re-arms
 `autostart.once`, so a guide that gained a step comes back for everyone.
 
+### Drawing steps with the host's own components
+
+By default a guide draws the built-in overlay: a spotlight on the target and a
+card with the step text, a counter and Next/Exit buttons. Pass a `presenter` to
+draw each step yourself instead, with the host's design system or a shape the
+card does not fit, such as a target-less sequence of slides. The engine keeps
+running autostart, progress, resume and versioning; only the rendering changes.
+
+```ts
+mount({
+	presenter: {
+		show(step, el, ctx) {
+			tour.set({ title: ctx.title, body: ctx.body, index: ctx.index, total: ctx.total });
+			tour.onNext(ctx.next);
+			tour.onExit(ctx.exit);
+		},
+		settle() {},
+		hide() {
+			tour.close();
+		},
+	},
+});
+```
+
+`show`, `settle` and `hide` are required. `show` is called once per step with the
+resolved target element, or `null` when the step has none, and a context holding
+the localized `title` and `body`, the step's `index` and `total`, the `action` it
+performs, and `next` and `exit` callbacks. `next` is `null` when the step waits
+for the user to act on the page rather than press a button. `settle` runs after
+the step's expectations hold and may return a promise to delay the next step.
+`hide` runs once when the run ends or is aborted.
+
+`message`, `moveCursor` and `ripple` are optional. `message` shows a card with
+no step behind it, such as the offer to navigate to another route; without it
+that prompt is not drawn. `moveCursor` and `ripple` animate a pointer in preview
+and doc modes; without them no pointer is drawn.
+
+When a `presenter` is supplied the built-in overlay stays idle for the whole
+run: it is not shown, moved or resized, so nothing is drawn over the host's UI.
+Pass a function instead of an object to choose per mode. It is called with
+`'guide'`, `'doc'` or `'none'` and returns the presenter to use; a plain object
+applies to guide and doc rendering only, and run mode stays silent.
+
+```ts
+import { nonePresenter } from '@dorsk/journey/runtime';
+
+mount({
+	presenter: (name) => (name === 'guide' ? hostGuide : nonePresenter),
+});
+```
+
 ## Theming
 
 The overlay reads CSS custom properties, so it can be matched to the host's
