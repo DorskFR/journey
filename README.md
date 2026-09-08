@@ -109,12 +109,19 @@ if (import.meta.env.PUBLIC_JOURNEY) {
 		editor: import.meta.env.PUBLIC_JOURNEY === 'edit',
 		translate: (id, locale) => t(id, locale),
 		variants: { theme: (v) => setTheme(v) },
+		navigate: (route) => router.goto(route),
 	});
 }
 ```
 
 Start a guide with `window.__journey.start('create-note')` or a
 `data-journey-start="create-note"` attribute on any element.
+
+When a step names a route the user is not on, the guide offers to take them
+there rather than moving on its own. `navigate` hands that over to the host
+router; without it the button assigns `location.href`, which costs a document
+load but resumes from the saved progress. Nothing navigates until the user
+presses the button.
 
 ## Theming
 

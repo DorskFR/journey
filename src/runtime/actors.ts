@@ -157,7 +157,11 @@ export const steppedActor: Actor = {
 export const humanActor: Actor = {
 	human: true,
 	async navigate(route, ctx) {
-		ctx.presenter.message?.('Go to another page', `Open ${route} to continue.`, ctx.exit);
+		ctx.presenter.message?.('Go to another page', `Open ${route} to continue.`, ctx.exit, () => {
+			const hook = ctx.navigate;
+			if (hook) void hook(route);
+			else location.href = route;
+		});
 	},
 	async perform(step, el, action, ctx) {
 		if (action.kind === 'none' || action.kind === 'navigate') {

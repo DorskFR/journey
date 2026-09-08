@@ -23,6 +23,8 @@ export interface RunResult {
 	aborted?: boolean;
 }
 
+export type NavigateHook = (route: string) => void | Promise<void>;
+
 export interface ActorCtx {
 	signal: AbortSignal;
 	next: Promise<void>;
@@ -31,6 +33,7 @@ export interface ActorCtx {
 	exit: () => void;
 	proceed: () => void;
 	markActed: () => void;
+	navigate?: NavigateHook;
 }
 
 export interface Actor {
@@ -58,7 +61,13 @@ export interface Presenter {
 	show(step: IRStep, el: Element | null, ctx: ShowCtx): void;
 	settle(step: IRStep): void | Promise<void>;
 	hide(): void;
-	message?(title: string, body: string, exit: () => void, next?: () => void): void;
+	message?(
+		title: string,
+		body: string,
+		exit: () => void,
+		next?: () => void,
+		nextLabel?: string,
+	): void;
 	moveCursor?(el: Element): Promise<void>;
 	ripple?(el: Element): void;
 }
@@ -80,6 +89,7 @@ export interface EngineDeps {
 	masks?: string[];
 	track?: (event: string, data: Record<string, unknown>) => void;
 	progress?: ProgressSink;
+	navigate?: NavigateHook;
 }
 
 export type EngineEvent =
@@ -439,6 +449,7 @@ export class Engine {
 					exit,
 					proceed: nextDeferred.resolve,
 					markActed: () => progress?.save(i, true),
+					navigate: this.deps.navigate,
 				};
 				try {
 					this.emit('step:start', stepData);
