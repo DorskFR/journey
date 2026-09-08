@@ -20,32 +20,35 @@ export interface Overlay {
 	layout(): void;
 }
 
+// Defaults belong in the var() fallback: declaring them on :host would shadow
+// the value a host page inherits in.
 const CSS_TEXT = `
-:host{position:fixed;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;background:transparent;overflow:visible;pointer-events:none;color:#111;font:14px/1.4 system-ui,sans-serif}
+:host{position:fixed;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;background:transparent;overflow:visible;pointer-events:none;color:var(--journey-text,#111);font:var(--journey-font,14px/1.4 system-ui,sans-serif)}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-.spot{position:absolute;border-radius:6px;box-shadow:0 0 0 3px #ffd166,0 0 0 9999px rgba(0,0,0,.55);transition:top .25s,left .25s,width .25s,height .25s}
-.spot.doc{box-shadow:0 0 0 3px #ffd166}
-.badge{position:absolute;min-width:26px;height:26px;padding:0 8px;border-radius:13px;background:#ffd166;color:#111;font-weight:700;line-height:26px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3)}
-.card{position:absolute;width:320px;max-width:calc(100vw - 24px);padding:16px;border-radius:8px;background:#fff;color:#111;box-shadow:0 8px 24px rgba(0,0,0,.25);pointer-events:auto}
+.spot{position:absolute;border-radius:var(--journey-radius-sm,6px);box-shadow:0 0 0 3px var(--journey-accent,#ffd166),0 0 0 9999px var(--journey-scrim,rgba(0,0,0,.55));transition:top .25s,left .25s,width .25s,height .25s}
+.spot.doc{box-shadow:0 0 0 3px var(--journey-accent,#ffd166)}
+.badge{position:absolute;min-width:26px;height:26px;padding:0 8px;border-radius:13px;background:var(--journey-accent,#ffd166);color:var(--journey-accent-ink,#111);font-weight:700;line-height:26px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.card{position:absolute;width:320px;max-width:calc(100vw - 24px);padding:16px;border-radius:var(--journey-radius,8px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);box-shadow:var(--journey-shadow,0 8px 24px rgba(0,0,0,.25));pointer-events:auto}
 .card h2{margin:0 0 8px;font-size:16px}
 .card p{margin:0 0 12px}
-.card .meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#555}
+.card .meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--journey-text-muted,#555)}
 .card .buttons{display:flex;gap:8px}
-.card button{padding:6px 12px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#111;font:inherit;cursor:pointer}
-.card button.next{background:#ffd166;border-color:#ffd166;font-weight:600}
-.card kbd{margin-left:2px;padding:1px 4px;border:1px solid #ccc;border-radius:3px;background:#f4f4f4;color:#666;font:11px/1 system-ui,sans-serif}
-.caption{position:absolute;max-width:280px;padding:8px 12px;border-radius:6px;background:#fff;color:#111;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+.card button{padding:6px 12px;border:1px solid var(--journey-border,#ccc);border-radius:var(--journey-radius-sm,6px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);font:inherit;cursor:pointer}
+.card button.next{background:var(--journey-accent,#ffd166);border-color:var(--journey-accent,#ffd166);color:var(--journey-accent-ink,#111);font-weight:600}
+.card kbd{margin-left:2px;padding:1px 4px;border:1px solid var(--journey-border,#ccc);border-radius:3px;background:var(--journey-surface-muted,#f4f4f4);color:var(--journey-text-faint,#666);font:11px/1 system-ui,sans-serif}
+.caption{position:absolute;max-width:280px;padding:8px 12px;border-radius:var(--journey-radius-sm,6px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);box-shadow:var(--journey-shadow-sm,0 4px 12px rgba(0,0,0,.25))}
 .cursor{position:absolute;top:0;left:0;width:24px;height:24px;transition:transform 350ms ease;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))}
-.ripple{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border:3px solid #ffd166;border-radius:50%;opacity:0}
+.cursor path{fill:var(--journey-text,#111);stroke:var(--journey-surface,#fff)}
+.ripple{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border:3px solid var(--journey-accent,#ffd166);border-radius:50%;opacity:0}
 .ripple.on{animation:journey-ripple .5s ease-out}
 @keyframes journey-ripple{0%{transform:scale(1);opacity:1}100%{transform:scale(4);opacity:0}}
-.toast{position:fixed;right:16px;bottom:16px;padding:8px 14px;border-radius:6px;background:#111;color:#fff;font-weight:600}
-.toast kbd{padding:2px 6px;border:1px solid #888;border-radius:4px;background:#333;font:inherit}
+.toast{position:fixed;right:16px;bottom:16px;padding:8px 14px;border-radius:var(--journey-radius-sm,6px);background:var(--journey-inverse-surface,#111);color:var(--journey-inverse-text,#fff);font-weight:600}
+.toast kbd{padding:2px 6px;border:1px solid var(--journey-inverse-border,#888);border-radius:4px;background:var(--journey-inverse-surface-raised,#333);font:inherit}
 .panel{pointer-events:auto}
 .launcher{position:fixed;left:16px;bottom:16px;pointer-events:auto;font:inherit}
-.launcher button{padding:6px 12px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#111;font:inherit;cursor:pointer}
-.launcher ul{list-style:none;margin:0 0 8px;padding:8px;background:#fff;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+.launcher button{padding:6px 12px;border:1px solid var(--journey-border,#ccc);border-radius:var(--journey-radius-sm,6px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);font:inherit;cursor:pointer}
+.launcher ul{list-style:none;margin:0 0 8px;padding:8px;background:var(--journey-surface,#fff);border-radius:var(--journey-radius-sm,6px);box-shadow:var(--journey-shadow-sm,0 4px 12px rgba(0,0,0,.25))}
 `;
 
 const CURSOR_SVG =
