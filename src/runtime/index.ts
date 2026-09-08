@@ -15,6 +15,7 @@ import {
 	resolveOne,
 	resolvePath,
 } from './resolve.js';
+import { defaultStorage, type JourneyStorage } from './storage.js';
 import {
 	type Localize,
 	resolveStrings,
@@ -32,6 +33,7 @@ export * from './overlay.js';
 export * from './presenters.js';
 export * from './progress.js';
 export * from './resolve.js';
+export * from './storage.js';
 export * from './strings.js';
 export * from './text.js';
 
@@ -48,6 +50,7 @@ export interface MountOptions {
 	launcher?: boolean;
 	strings?: StringsOption;
 	navigate?: NavigateHook;
+	storage?: JourneyStorage;
 }
 
 export interface StartOptions {
@@ -69,7 +72,7 @@ export const resolve = {
 
 export interface JourneyApi {
 	resolve: typeof resolve;
-	register(journeys: Journey[]): void;
+	register(journeys: Journey[]): Promise<void>;
 	list(): Array<{ id: string; title?: string; version: number }>;
 	start(id: string, opts?: StartOptions): Promise<RunResult>;
 	stop(): void;
@@ -129,6 +132,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 	if (window.__journey) return window.__journey;
 
 	const journeys = new Map<string, IR>();
+	const store = options.storage ?? defaultStorage;
 	const overlay = createOverlay();
 	let engine: Engine | null = null;
 	let currentId: string | null = null;
@@ -185,25 +189,28 @@ export function mount(options: MountOptions = {}): JourneyApi {
 			navigate: options.navigate,
 			progress: {
 				save(index, acted, navigated) {
-					writeProgress({
-						id,
-						version: ir.version,
-						index,
-						mode,
-						params,
-						variant,
-						ir,
-						acted,
-						navigated,
-					});
+					void writeProgress(
+						{
+							id,
+							version: ir.version,
+							index,
+							mode,
+							params,
+							variant,
+							ir,
+							acted,
+							navigated,
+						},
+						store,
+					);
 				},
-				clear: clearProgress,
+				clear: () => void clearProgress(store),
 			},
 		});
 		engine = run;
 		currentId = id;
 		run.on('journey:done', () => {
-			if (ir.autostart?.once) localStorage.setItem(doneKey(ir), '1');
+			if (ir.autostart?.once) void store.set(doneKey(ir), '1');
 		});
 		try {
 			return await run.run(opts.from ?? 0, resume);
@@ -219,14 +226,14 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		return startRun(id, opts, { acted: false, navigated: false });
 	}
 
-	function resume(): void {
-		const progress = readProgress();
+	async function resume(): Promise<void> {
+		const progress = await readProgress(store);
 		if (!progress || progress.mode === DRIVER_MODE || engine) return;
 		const ir = journeys.get(progress.id);
 		if (!ir || ir.version !== progress.version) return;
 		const from = progress.index;
 		if (from >= ir.steps.length) {
-			clearProgress();
+			await clearProgress(store);
 			return;
 		}
 		void startRun(
@@ -236,26 +243,31 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		).catch(() => {});
 	}
 
-	function autostart(): void {
+	async function autostart(): Promise<void> {
 		if (engine) return;
 		for (const ir of journeys.values()) {
 			const auto = ir.autostart;
 			if (!auto || location.pathname !== auto.route) continue;
-			if (auto.once && localStorage.getItem(doneKey(ir))) continue;
+			if (auto.once && ((await store.get(doneKey(ir))) ?? null) !== null) continue;
 			void start(ir.id, { mode: 'guide' }).catch(() => {});
 			return;
 		}
 	}
 
-	function register(list: Journey[]): void {
+	function register(list: Journey[]): Promise<void> {
 		for (const journey of list) {
 			const ir = compile(journey, { public: true });
 			journeys.set(ir.id, ir);
 		}
-		onReady(() => {
-			resume();
-			autostart();
-			renderLauncher();
+		return new Promise<void>((settled) => {
+			onReady(() => {
+				void (async () => {
+					await resume();
+					await autostart();
+					renderLauncher();
+					settled();
+				})();
+			});
 		});
 	}
 

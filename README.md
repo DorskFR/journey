@@ -123,6 +123,32 @@ router; without it the button assigns `location.href`, which costs a document
 load but resumes from the saved progress. Nothing navigates until the user
 presses the button.
 
+`register` resolves once a resumed or autostarted run has been picked up, so
+`await` it before reading `window.__journey.engine()`.
+
+### Where the guide state lives
+
+Two things are remembered: where a run got to, and whether an `autostart.once`
+journey has been seen. By default the first goes to `sessionStorage` and the
+second to `localStorage`, which keeps them in one browser.
+
+Pass a `storage` adapter to put them somewhere else — a user record on the
+server, so a guide half-finished on a laptop carries on at a desk, and the
+backend can decide to show it again. It may be async, and it replaces both.
+
+```ts
+mount({
+	storage: {
+		get: (key) => api.get(`/guide-state/${key}`),
+		set: (key, value) => api.put(`/guide-state/${key}`, value),
+		remove: (key) => api.delete(`/guide-state/${key}`),
+	},
+});
+```
+
+Bumping a journey's `version` already invalidates a stale resume and re-arms
+`autostart.once`, so a guide that gained a step comes back for everyone.
+
 ## Theming
 
 The overlay reads CSS custom properties, so it can be matched to the host's

@@ -116,7 +116,7 @@ export function createDriver(host: DriverHost): Driver {
 				session.engine.stop();
 				host.onEngine?.(null);
 			}
-			const progress = readProgress();
+			const progress = await readProgress();
 			const resumed =
 				progress &&
 				progress.id === ir.id &&
@@ -139,7 +139,7 @@ export function createDriver(host: DriverHost): Driver {
 				track: host.track,
 				progress: {
 					save(index, acted, navigated) {
-						writeProgress({
+						void writeProgress({
 							id: ir.id,
 							version: ir.version,
 							index,
@@ -151,7 +151,7 @@ export function createDriver(host: DriverHost): Driver {
 							navigated,
 						});
 					},
-					clear: clearProgress,
+					clear: () => void clearProgress(),
 				},
 			});
 			const s: Session = {
