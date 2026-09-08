@@ -42,6 +42,7 @@ function fillCard(
 		body?: string;
 		meta?: string;
 		next?: (() => void) | null;
+		nextLabel?: string;
 		exit: () => void;
 		hints: boolean;
 	},
@@ -69,7 +70,7 @@ function fillCard(
 	buttons.append(button(t('exit'), ctx.hints ? 'Esc' : null, 'exit', ctx.exit));
 	let next: HTMLButtonElement | null = null;
 	if (ctx.next) {
-		next = button(t('next'), ctx.hints ? '\u21b5' : null, 'next', ctx.next);
+		next = button(ctx.nextLabel ?? t('next'), ctx.hints ? '\u21b5' : null, 'next', ctx.next);
 		buttons.append(next);
 	}
 	meta.append(counter, buttons);
@@ -191,10 +192,10 @@ export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize):
 			hideAll(overlay);
 			overlay.track(null);
 		},
-		message(title, body, exit, next) {
+		message(title, body, exit, next, nextLabel) {
 			attachKey(exit, next ?? null);
 			hideAll(overlay, ['card']);
-			fillCard(overlay.parts.card, t, { title, body, exit, next, hints: true });
+			fillCard(overlay.parts.card, t, { title, body, exit, next, nextLabel, hints: true });
 			overlay.track(null);
 			overlay.raise();
 		},

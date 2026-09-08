@@ -3,7 +3,7 @@ import type { IR, Journey, Text } from '../core/types.js';
 import { VERSION } from '../version.js';
 import { domActor, humanActor, steppedActor } from './actors.js';
 import { createDriver, MODE as DRIVER_MODE, type Driver } from './driver.js';
-import { type Actor, Engine, type Presenter, type RunResult } from './engine.js';
+import { type Actor, Engine, type NavigateHook, type Presenter, type RunResult } from './engine.js';
 import { createOverlay, type Overlay } from './overlay.js';
 import { docPresenter, guidePresenter, nonePresenter } from './presenters.js';
 import { clearProgress, readProgress, writeProgress } from './progress.js';
@@ -47,6 +47,7 @@ export interface MountOptions {
 	exportUrl?: string;
 	launcher?: boolean;
 	strings?: StringsOption;
+	navigate?: NavigateHook;
 }
 
 export interface StartOptions {
@@ -103,7 +104,13 @@ function localized(actor: Actor, t: Localize): Actor {
 			const presenter: Presenter = {
 				...ctx.presenter,
 				message: (_title, _body, exit, next) =>
-					ctx.presenter.message?.(t('goToPage'), t('goToPageBody', { route }), exit, next),
+					ctx.presenter.message?.(
+						t('goToPage'),
+						t('goToPageBody', { route }),
+						exit,
+						next,
+						next ? t('goToPageAction') : undefined,
+					),
 			};
 			return actor.navigate(route, { ...ctx, presenter });
 		},
@@ -175,6 +182,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 			translate: options.translate,
 			probes: options.probes,
 			track: options.track,
+			navigate: options.navigate,
 			progress: {
 				save(index, acted, navigated) {
 					writeProgress({

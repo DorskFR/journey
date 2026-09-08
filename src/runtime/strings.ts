@@ -4,6 +4,7 @@ export interface Strings {
 	step: string;
 	goToPage: string;
 	goToPageBody: string;
+	goToPageAction: string;
 	press: string;
 }
 
@@ -17,6 +18,7 @@ export const DEFAULT_STRINGS: Strings = {
 	step: 'Step {i} of {n}',
 	goToPage: 'Go to another page',
 	goToPageBody: 'Open {route} to continue.',
+	goToPageAction: 'Take me there',
 	press: 'Press',
 };
 
