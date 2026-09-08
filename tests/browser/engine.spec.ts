@@ -232,3 +232,28 @@ test('mount strings override the card text', async ({ context }) => {
 	await expect(card(fresh).locator('button.exit')).toContainText('Schließen');
 	await expect(card(fresh).locator('button.next')).toBeFocused();
 });
+
+test('the mounted runtime strips qaOnly steps and qa. probes', async ({ page }) => {
+	await page.evaluate(() =>
+		window.__journey?.register([
+			{
+				id: 'qa-filtered',
+				version: 1,
+				route: '/',
+				steps: [
+					{ id: 'first', say: { title: 'First' }, expect: [{ probe: 'qa.internal', equals: 1 }] },
+					{ id: 'setup', qaOnly: true, say: { title: 'Setup' } },
+					{ id: 'last', say: { title: 'Last' } },
+				],
+			},
+		]),
+	);
+	await start(page, 'qa-filtered');
+
+	await expect(card(page)).toContainText('Step 1 of 2');
+	expect(await page.evaluate(() => window.__journey?.engine()?.ir.steps.map((s) => s.id))).toEqual([
+		'first',
+		'last',
+	]);
+	expect(await page.evaluate(() => window.__journey?.engine()?.ir.steps[0]?.expect)).toEqual([]);
+});

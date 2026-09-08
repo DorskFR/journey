@@ -241,7 +241,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 
 	function register(list: Journey[]): void {
 		for (const journey of list) {
-			const ir = compile(journey);
+			const ir = compile(journey, { public: true });
 			journeys.set(ir.id, ir);
 		}
 		onReady(() => {
