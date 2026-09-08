@@ -116,6 +116,38 @@ if (import.meta.env.PUBLIC_JOURNEY) {
 Start a guide with `window.__journey.start('create-note')` or a
 `data-journey-start="create-note"` attribute on any element.
 
+## Theming
+
+The overlay reads CSS custom properties, so it can be matched to the host's
+palette. Set them anywhere they will inherit — usually `:root` — and they cross
+the shadow boundary. Each falls back to the built-in value, so an app that sets
+none keeps the default look, and one that switches themes at runtime only has to
+move the variables.
+
+```css
+:root {
+	--journey-accent: #ffd166;
+	--journey-accent-ink: #111;
+	--journey-surface: #fff;
+	--journey-surface-muted: #f4f4f4;
+	--journey-text: #111;
+	--journey-text-muted: #555;
+	--journey-text-faint: #666;
+	--journey-border: #ccc;
+	--journey-scrim: rgba(0, 0, 0, 0.55);
+	--journey-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+	--journey-shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.25);
+	--journey-radius: 8px;
+	--journey-radius-sm: 6px;
+	--journey-font: 14px/1.4 system-ui, sans-serif;
+	/* the toast, which is deliberately inverted against the page */
+	--journey-inverse-surface: #111;
+	--journey-inverse-surface-raised: #333;
+	--journey-inverse-text: #fff;
+	--journey-inverse-border: #888;
+}
+```
+
 ## Existing Playwright suite
 
 ```ts
