@@ -1,4 +1,5 @@
 import type { IR } from '../core/types.js';
+import { defaultStorage, type JourneyStorage } from './storage.js';
 
 export const PROGRESS_KEY = 'journey:progress';
 
@@ -14,10 +15,12 @@ export interface Progress {
 	navigated?: boolean;
 }
 
-export function readProgress(): Progress | null {
+export async function readProgress(
+	storage: JourneyStorage = defaultStorage,
+): Promise<Progress | null> {
 	try {
-		const raw = sessionStorage.getItem(PROGRESS_KEY);
-		if (raw === null) return null;
+		const raw = await storage.get(PROGRESS_KEY);
+		if (raw === null || raw === undefined) return null;
 		const parsed = JSON.parse(raw) as Progress;
 		return typeof parsed === 'object' && parsed !== null && typeof parsed.id === 'string'
 			? parsed
@@ -27,14 +30,17 @@ export function readProgress(): Progress | null {
 	}
 }
 
-export function writeProgress(progress: Progress): void {
+export async function writeProgress(
+	progress: Progress,
+	storage: JourneyStorage = defaultStorage,
+): Promise<void> {
 	try {
-		sessionStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+		await storage.set(PROGRESS_KEY, JSON.stringify(progress));
 	} catch {}
 }
 
-export function clearProgress(): void {
+export async function clearProgress(storage: JourneyStorage = defaultStorage): Promise<void> {
 	try {
-		sessionStorage.removeItem(PROGRESS_KEY);
+		await storage.remove(PROGRESS_KEY);
 	} catch {}
 }

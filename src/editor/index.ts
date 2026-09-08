@@ -235,15 +235,15 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		return `${running ? 'running' : outcome} ${done}/${total}`;
 	};
 
-	const resumeRun = (): void => {
-		const progress = readProgress();
+	const resumeRun = async (): Promise<void> => {
+		const progress = await readProgress();
 		if (!progress || progress.id !== draft.id || progress.mode === 'driver') return;
 		if (draft.steps.length === 0) return;
 		const built = buildJourney();
 		if (!built) return;
 		running = true;
 		collapsed = true;
-		api.register([built]);
+		await api.register([built]);
 		attach(api.engine());
 		render();
 	};
@@ -431,7 +431,7 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 	mounted = editor;
 	window.__journeyEditor = editor;
 	render();
-	resumeRun();
+	void resumeRun();
 	if (restored?.recording) {
 		startRecording();
 		const route = currentRoute();
