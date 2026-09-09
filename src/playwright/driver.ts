@@ -30,6 +30,7 @@ export interface RunOptions {
 	variant?: Record<string, string>;
 	viewports?: Record<string, Viewport>;
 	presenter?: 'none' | 'doc' | 'guide';
+	placement?: LoadOptions['placement'];
 	mask?: boolean;
 	masks?: string[];
 	pace?: Pace;
@@ -184,6 +185,7 @@ export async function runJourney(page: Page, ir: IR, opts: RunOptions): Promise<
 		params,
 		variant,
 		presenter: opts.presenter ?? 'none',
+		placement: opts.placement,
 		mask: opts.mask,
 		masks: opts.masks,
 		pace: opts.pace,

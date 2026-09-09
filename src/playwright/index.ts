@@ -29,6 +29,7 @@ export interface Loaded {
 export interface JourneyRunOptions {
 	variant?: Record<string, string>;
 	presenter?: RunOptions['presenter'];
+	placement?: RunOptions['placement'];
 	mask?: boolean;
 	onCapture?: RunOptions['onCapture'];
 }
@@ -68,6 +69,7 @@ export async function runConfigured(
 			variant,
 			viewports: viewports(loaded.config),
 			presenter: opts.presenter ?? 'none',
+			placement: opts.placement ?? loaded.config.placement,
 			mask: opts.mask,
 			masks: loaded.config.mask,
 			pace: opts.mask ? loaded.config.pace : undefined,

@@ -30,9 +30,11 @@ import {
 } from './report.js';
 
 export type Presenter = 'doc' | 'guide' | 'none';
+export type Placement = 'anchored' | 'banner';
 
 export const DEFAULT_FORMATS: VideoFormat[] = ['webm', 'mp4'];
 const PRESENTERS: Presenter[] = ['doc', 'guide', 'none'];
+const PLACEMENTS: Placement[] = ['anchored', 'banner'];
 
 export function parseVariantFilter(value: string | undefined): Record<string, string> {
 	const out: Record<string, string> = {};
@@ -58,6 +60,14 @@ export function presenterOf(argv: Argv, loaded: LoadedConfig): Presenter {
 		throw new Error(`journey book: unknown presenter "${value}"`);
 	}
 	return value as Presenter;
+}
+
+export function placementOf(argv: Argv, loaded: LoadedConfig): Placement {
+	const value = flagString(argv, 'placement') ?? loaded.config.placement ?? 'anchored';
+	if (!PLACEMENTS.includes(value as Placement)) {
+		throw new Error(`journey book: unknown placement "${value}"`);
+	}
+	return value as Placement;
 }
 
 export function wantsVideo(ir: IR, flag: boolean): boolean {
@@ -103,6 +113,7 @@ export function convertVideo(
 
 interface BookOptions {
 	presenter: Presenter;
+	placement: Placement;
 	video: boolean;
 	formats: VideoFormat[];
 }
@@ -138,6 +149,7 @@ async function bookVariant(
 		};
 		const result = await runConfigured(page, loaded, ir, variant, {
 			presenter: opts.presenter,
+			placement: opts.placement,
 			mask: true,
 			onCapture,
 		});
@@ -175,6 +187,7 @@ export async function runBook(argv: Argv): Promise<number> {
 	const filter = parseVariantFilter(flagString(argv, 'variant'));
 	const opts: BookOptions = {
 		presenter: presenterOf(argv, loaded),
+		placement: placementOf(argv, loaded),
 		video: argv.flags.video === true,
 		formats: loaded.config.video?.formats ?? DEFAULT_FORMATS,
 	};

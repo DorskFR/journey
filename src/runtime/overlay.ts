@@ -9,10 +9,13 @@ export type PartName =
 	| 'panel'
 	| 'launcher';
 
+export type Placement = 'anchored' | 'banner';
+
 export interface Overlay {
 	readonly host: HTMLElement;
 	readonly root: ShadowRoot;
 	readonly parts: Record<PartName, HTMLElement>;
+	placement: Placement;
 	raise(): void;
 	remove(): void;
 	target(): DOMRect | null;
@@ -38,6 +41,11 @@ const CSS_TEXT = `
 .card button.next{background:var(--journey-accent,#ffd166);border-color:var(--journey-accent,#ffd166);color:var(--journey-accent-ink,#111);font-weight:600}
 .card kbd{margin-left:2px;padding:1px 4px;border:1px solid var(--journey-border,#ccc);border-radius:3px;background:var(--journey-surface-muted,#f4f4f4);color:var(--journey-text-faint,#666);font:11px/1 system-ui,sans-serif}
 .caption{position:absolute;max-width:280px;padding:8px 12px;border-radius:var(--journey-radius-sm,6px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);box-shadow:var(--journey-shadow-sm,0 4px 12px rgba(0,0,0,.25))}
+:host(.banner) .caption,:host(.banner) .card{top:auto;bottom:var(--journey-banner-inset,0px);left:0;right:0;width:auto;max-width:none;border-radius:0;padding:var(--journey-banner-padding,16px 24px);background:var(--journey-banner-surface,rgba(17,17,17,.72));color:var(--journey-banner-text,#fff);box-shadow:none;text-align:var(--journey-banner-align,center)}
+:host(.banner) .card{width:auto}
+:host(.banner) .card .meta{justify-content:var(--journey-banner-align,center)}
+:host(.banner) .card button{background:var(--journey-banner-surface,rgba(17,17,17,.72));border-color:var(--journey-banner-text,#fff);color:var(--journey-banner-text,#fff)}
+:host(.banner) .card button.next{background:var(--journey-accent,#ffd166);border-color:var(--journey-accent,#ffd166);color:var(--journey-accent-ink,#111)}
 .cursor{position:absolute;top:0;left:0;width:24px;height:24px;transition:transform 350ms ease;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))}
 .cursor path{fill:var(--journey-text,#111);stroke:var(--journey-surface,#fff)}
 .ripple{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border:3px solid var(--journey-accent,#ffd166);border-radius:50%;opacity:0}
@@ -84,9 +92,23 @@ class OverlayImpl implements Overlay {
 		showPopover: ShowPopover;
 		togglePopover: TogglePopover;
 	} | null = null;
+	private mode: Placement = 'anchored';
 	private readonly onLayout = (): void => {
 		if (this.current) this.layout();
 	};
+
+	get placement(): Placement {
+		return this.mode;
+	}
+
+	set placement(next: Placement) {
+		if (this.mode === next) return;
+		this.mode = next;
+		const host = this.hostEl;
+		if (!host) return;
+		host.classList.toggle('banner', next === 'banner');
+		this.layout();
+	}
 
 	get host(): HTMLElement {
 		return this.ensure().host;
@@ -122,6 +144,7 @@ class OverlayImpl implements Overlay {
 			root.append(el);
 			parts[name] = el;
 		}
+		if (this.mode === 'banner') host.classList.add('banner');
 		document.documentElement.append(host);
 		this.hostEl = host;
 		this.rootEl = root;
@@ -157,13 +180,16 @@ class OverlayImpl implements Overlay {
 		};
 	}
 
+	// The top layer ignores z-index, so a host that sets one wants normal stacking.
 	raise(): void {
 		const host = this.hostEl;
 		const originals = this.originals;
 		if (!host || !originals || !host.isConnected) return;
+		const z = getComputedStyle(host).getPropertyValue('--journey-z').trim();
 		try {
 			if (host.matches(':popover-open')) host.hidePopover();
-			originals.showPopover.call(host);
+			host.style.zIndex = z;
+			if (!z) originals.showPopover.call(host);
 		} catch {}
 	}
 
@@ -216,6 +242,13 @@ class OverlayImpl implements Overlay {
 				top: `${rect.top - pad - 13}px`,
 				left: `${rect.left - pad - 13}px`,
 			});
+		}
+		if (this.mode === 'banner') {
+			for (const name of ['card', 'caption'] as const) {
+				parts[name].style.top = '';
+				parts[name].style.left = '';
+			}
+			return;
 		}
 		for (const name of ['card', 'caption'] as const) {
 			const el = parts[name];
