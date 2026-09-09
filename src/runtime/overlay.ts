@@ -28,16 +28,17 @@ export interface Overlay {
 const CSS_TEXT = `
 :host{position:fixed;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;background:transparent;overflow:visible;pointer-events:none;color:var(--journey-text,#111);font:var(--journey-font,14px/1.4 system-ui,sans-serif)}
 *{box-sizing:border-box}
+.spot,.badge,.caption,.toast,.cursor,.ripple{pointer-events:none}
 [hidden]{display:none!important}
 .spot{position:absolute;border-radius:var(--journey-radius-sm,6px);box-shadow:0 0 0 3px var(--journey-accent,#ffd166),0 0 0 9999px var(--journey-scrim,rgba(0,0,0,.55));transition:top .25s,left .25s,width .25s,height .25s}
 .spot.doc{box-shadow:0 0 0 3px var(--journey-accent,#ffd166)}
 .badge{position:absolute;min-width:26px;height:26px;padding:0 8px;border-radius:13px;background:var(--journey-accent,#ffd166);color:var(--journey-accent-ink,#111);font-weight:700;line-height:26px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3)}
-.card{position:absolute;width:320px;max-width:calc(100vw - 24px);padding:16px;border-radius:var(--journey-radius,8px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);box-shadow:var(--journey-shadow,0 8px 24px rgba(0,0,0,.25));pointer-events:auto}
+.card{position:absolute;width:320px;max-width:calc(100vw - 24px);padding:16px;border-radius:var(--journey-radius,8px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);box-shadow:var(--journey-shadow,0 8px 24px rgba(0,0,0,.25));pointer-events:none}
 .card h2{margin:0 0 8px;font-size:16px}
 .card p{margin:0 0 12px}
 .card .meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--journey-text-muted,#555)}
 .card .buttons{display:flex;gap:8px}
-.card button{padding:6px 12px;border:1px solid var(--journey-border,#ccc);border-radius:var(--journey-radius-sm,6px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);font:inherit;cursor:pointer}
+.card button{pointer-events:auto;padding:6px 12px;border:1px solid var(--journey-border,#ccc);border-radius:var(--journey-radius-sm,6px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);font:inherit;cursor:pointer}
 .card button.next{background:var(--journey-accent,#ffd166);border-color:var(--journey-accent,#ffd166);color:var(--journey-accent-ink,#111);font-weight:600}
 .card kbd{margin-left:2px;padding:1px 4px;border:1px solid var(--journey-border,#ccc);border-radius:3px;background:var(--journey-surface-muted,#f4f4f4);color:var(--journey-text-faint,#666);font:11px/1 system-ui,sans-serif}
 .caption{position:absolute;max-width:280px;padding:8px 12px;border-radius:var(--journey-radius-sm,6px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);box-shadow:var(--journey-shadow-sm,0 4px 12px rgba(0,0,0,.25))}

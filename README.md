@@ -238,6 +238,11 @@ way; only the text moves. The banner has its own tokens: `--journey-banner-surfa
 `--journey-banner-text`, `--journey-banner-padding`, `--journey-banner-align` and
 `--journey-banner-inset`.
 
+Nothing the overlay draws takes the pointer. The ring, badge, caption and card
+are all transparent to hit-testing, so hovering a target still opens the app's
+own tooltip and clicking it still reaches the app even where the callout covers
+it. Only the guide card's buttons accept clicks.
+
 The overlay itself sits in the top layer, above everything the page can stack.
 Set `--journey-z` to take it out of the top layer and into the normal stacking
 order at that z-index, so the app's own popovers can come out in front:
