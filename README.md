@@ -203,8 +203,9 @@ and doc modes; without them no pointer is drawn.
 When a `presenter` is supplied the built-in overlay stays idle for the whole
 run: it is not shown, moved or resized, so nothing is drawn over the host's UI.
 Pass a function instead of an object to choose per mode. It is called with
-`'guide'`, `'doc'` or `'none'` and returns the presenter to use; a plain object
-applies to guide and doc rendering only, and run mode stays silent.
+`'guide'`, `'doc'`, `'spot'` or `'none'` and returns the presenter to use; a
+plain object applies to every named presenter but `none`, so run mode stays
+silent.
 
 ```ts
 import { nonePresenter } from '@dorsk/journey/runtime';
@@ -213,6 +214,27 @@ mount({
 	presenter: (name) => (name === 'guide' ? hostGuide : nonePresenter),
 });
 ```
+
+## What the captures show
+
+`book` draws each step with a presenter, chosen with `--presenter` or
+`presenter` in the config:
+
+| | drawn |
+| --- | --- |
+| `doc` (default) | focus ring, numbered badge, caption |
+| `spot` | focus ring, numbered badge |
+| `guide` | a card with Next and Exit, paced for a human |
+| `none` | the raw app |
+
+```sh
+npx journey book --presenter spot --video
+```
+
+`spot` is `doc` with the caption withheld — for captures that go into a page or
+a video carrying its own narration, where the on-screen text would repeat it.
+The journey keeps its `say` text: the manifest and the report still carry each
+capture's title and body.
 
 ## Where the step text sits
 

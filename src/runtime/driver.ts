@@ -8,7 +8,7 @@ import type { Params, Translate } from './text.js';
 export interface LoadOptions {
 	params: Params;
 	variant: Record<string, string>;
-	presenter: 'none' | 'doc' | 'guide';
+	presenter: 'none' | 'doc' | 'spot' | 'guide';
 	placement?: Placement;
 	mask?: boolean;
 	masks?: string[];

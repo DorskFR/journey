@@ -208,8 +208,13 @@ export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize):
 	};
 }
 
-export function docPresenter(overlay: Overlay, t: Localize = defaultLocalize): Presenter {
+export function docPresenter(
+	overlay: Overlay,
+	t: Localize = defaultLocalize,
+	options: { caption?: boolean } = {},
+): Presenter {
 	const cursor = cursorPresenter(overlay);
+	const captions = options.caption !== false;
 	let human = false;
 	return {
 		show(_step, el, ctx) {
@@ -217,7 +222,7 @@ export function docPresenter(overlay: Overlay, t: Localize = defaultLocalize): P
 			const { spot, badge, caption } = overlay.parts;
 			spot.classList.add('doc');
 			badge.textContent = String(ctx.index + 1);
-			const text = [ctx.title, ctx.body].filter((t) => t).join(' — ');
+			const text = captions ? [ctx.title, ctx.body].filter((t) => t).join(' — ') : '';
 			caption.textContent = text;
 			const extra = [
 				...(text ? ['caption' as const] : []),
@@ -243,4 +248,8 @@ export function docPresenter(overlay: Overlay, t: Localize = defaultLocalize): P
 			if (!human) cursor.ripple?.(el);
 		},
 	};
+}
+
+export function spotPresenter(overlay: Overlay, t: Localize = defaultLocalize): Presenter {
+	return docPresenter(overlay, t, { caption: false });
 }
