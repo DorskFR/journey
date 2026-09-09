@@ -6,6 +6,7 @@ import { loadConfig, outDir, resolveFrom } from '../cli/config.js';
 const loaded = await loadConfig();
 const app = loaded.config.app;
 const out = outDir(loaded);
+const slowMo = Number(process.env.JOURNEY_SLOW_MO);
 
 export default defineConfig({
 	testDir: dirname(fileURLToPath(import.meta.url)),
@@ -14,7 +15,10 @@ export default defineConfig({
 	snapshotPathTemplate: '{snapshotDir}/{arg}{ext}',
 	outputDir: join(out, '.test-results'),
 	reporter: process.env.CI ? 'github' : 'list',
-	use: { browserName: 'chromium' },
+	use: {
+		browserName: 'chromium',
+		...(Number.isFinite(slowMo) && slowMo > 0 ? { launchOptions: { slowMo } } : {}),
+	},
 	webServer: app?.start
 		? {
 				command: app.start,

@@ -14,7 +14,7 @@ export const USAGE = `Usage: journey <command> [options] [--config path]
 
 Commands:
   compile [--public] [-o file]                       validate and print IR as JSON
-  check [--strict]                                   run every journey and variant headlessly
+  check [--strict]                                   run every journey and variant
   test [playwright args...]                          run journeys through Playwright test
   record <url> [-o dir] [--no-har] [--headless]      record a journey in a browser
   book [id...] [--presenter p] [--video] [--variant dim=value]
@@ -23,6 +23,8 @@ Commands:
 
 Options:
   --config <path>   config file, default journey.config.ts
+  --headed          show the browser; check, test, book and pages
+  --slow-mo <ms>    pause that long before each browser operation
   --help            show this help
   --version         print the version`;
 
@@ -31,29 +33,38 @@ const COMMAND_HELP: Record<string, string> = {
 
   --public   strip qaOnly steps and qa.* probes
   -o file    write JSON to file instead of stdout`,
-	check: `Usage: journey check [--strict] [--config path]
+	check: `Usage: journey check [--strict] [--headed] [--slow-mo ms] [--config path]
 
-  --strict   fail when any target is not a stable path`,
-	test: `Usage: journey test [playwright args...] [--config path]
+  --strict        fail when any target is not a stable path
+  --headed        show the browser instead of running headless
+  --slow-mo <ms>  pause that long before each browser operation`,
+	test: `Usage: journey test [playwright args...] [--headed] [--slow-mo ms] [--config path]
 
+  --headed        show the browser instead of running headless
+  --slow-mo <ms>  pause that long before each browser operation
   extra arguments are forwarded to playwright test`,
 	record: `Usage: journey record <url> [-o dir] [--no-har] [--headless] [--config path]
 
   -o dir       output directory, default journeys
   --no-har     do not record a HAR file
   --headless   run headless and exit after the first export`,
-	book: `Usage: journey book [id...] [--presenter doc|guide|none] [--video] [--variant dim=value ...] [--config path]
+	book: `Usage: journey book [id...] [--presenter doc|guide|none] [--video] [--variant dim=value ...] [--headed] [--slow-mo ms] [--config path]
 
   id...                journeys to book, default all
   --presenter p        presenter shown in captures, default config.presenter or doc
   --video              record tour.webm for every journey (also when a capture has video: true)
-  --variant dim=value  only run variants matching, may repeat`,
-	pages: `Usage: journey pages [--config path]
+  --variant dim=value  only run variants matching, may repeat
+  --headed             show the browser instead of running headless
+  --slow-mo <ms>       pause that long before each browser operation`,
+	pages: `Usage: journey pages [--headed] [--slow-mo ms] [--config path]
 
-  screenshots every config.pages route per variant to <out>/pages/<name>/<variantKey>.png`,
+  screenshots every config.pages route per variant to <out>/pages/<name>/<variantKey>.png
+
+  --headed        show the browser instead of running headless
+  --slow-mo <ms>  pause that long before each browser operation`,
 };
 
-const VALUE_FLAGS = new Set(['config', 'o', 'variant', 'presenter']);
+const VALUE_FLAGS = new Set(['config', 'o', 'variant', 'presenter', 'slow-mo']);
 const REPEATABLE_FLAGS = new Set(['variant']);
 export const REPEAT_SEPARATOR = ',';
 
@@ -99,6 +110,22 @@ export function parseArgv(args: string[]): Argv {
 export function flagString(argv: Argv, name: string): string | undefined {
 	const value = argv.flags[name];
 	return typeof value === 'string' ? value : undefined;
+}
+
+export function flagMillis(argv: Argv, name: string): number | undefined {
+	const value = argv.flags[name];
+	if (value === undefined) return undefined;
+	const raw = typeof value === 'string' ? value.trim() : '';
+	const ms = raw === '' ? Number.NaN : Number(raw);
+	if (!Number.isFinite(ms) || ms < 0) {
+		throw new Error(`journey: --${name} expects milliseconds, got "${String(value)}"`);
+	}
+	return ms;
+}
+
+export function launchOptions(argv: Argv): { headless: boolean; slowMo?: number } {
+	const slowMo = flagMillis(argv, 'slow-mo');
+	return { headless: argv.flags.headed !== true, ...(slowMo === undefined ? {} : { slowMo }) };
 }
 
 const PLAYWRIGHT_HELP = `journey: this command needs @playwright/test next to @dorsk/journey.
