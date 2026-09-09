@@ -132,7 +132,11 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		pendingDigest = null;
 		clearTimeout(timer);
 		if (!draft.steps.includes(step)) return;
-		step.suggestions = suggest(before, after).map((s) => ({ ...s, accepted: false }));
+		const kept = step.suggestions.filter((s) => s.accepted);
+		const fresh = suggest(before, after)
+			.filter((s) => !kept.some((k) => k.label === s.label))
+			.map((s) => ({ ...s, accepted: false }));
+		step.suggestions = [...kept, ...fresh];
 		render();
 	};
 
@@ -185,6 +189,7 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 	const stopRecording = (): void => {
 		if (!recording) return;
 		observer.stop();
+		finalize(digest());
 		recording = false;
 		render();
 	};

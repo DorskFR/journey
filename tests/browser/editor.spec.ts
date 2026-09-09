@@ -306,6 +306,67 @@ test('values fill masked params and are missing when cleared', async ({ page }) 
 	await expect(panel(page, 'toggle')).toContainText('fail 0/1');
 });
 
+async function acceptedCount(page: Page): Promise<number> {
+	return page.evaluate(() => {
+		const steps = window.__journeyEditor?.draft().steps ?? [];
+		return steps[steps.length - 1]?.suggestions.filter((s) => s.accepted).length ?? 0;
+	});
+}
+
+test('a hand-added expectation outlives the settle of the click it was added to', async ({
+	page,
+}) => {
+	await page.goto(`${BASE}/?journey=edit`);
+	await waitForEditor(page);
+	await panel(page, 'record').click();
+	await expect(panel(page, 'stop')).toBeVisible();
+
+	await page.evaluate(() => {
+		const root = document.querySelector('journey-overlay')?.shadowRoot;
+		const find = <T extends Element>(selector: string): T => {
+			const found = root?.querySelector<T>(selector);
+			if (!found) throw new Error(`no ${selector}`);
+			return found;
+		};
+		document.querySelector<HTMLElement>('[data-journey="start"]')?.click();
+		const rows = root?.querySelectorAll<HTMLElement>('[data-editor="step"]') ?? [];
+		rows[rows.length - 1]?.querySelector<HTMLElement>('[data-editor="add-expect"]')?.click();
+		const kind = find<HTMLSelectElement>('[data-editor="expect-kind"]');
+		kind.value = 'url';
+		kind.dispatchEvent(new Event('change', { bubbles: true }));
+		find<HTMLElement>('[data-editor="expect-add"]').click();
+	});
+
+	expect(await acceptedCount(page)).toBe(1);
+	await page.waitForTimeout(600);
+	expect(await acceptedCount(page)).toBe(1);
+});
+
+test('stopping the recording settles the last step, so nothing rewrites it later', async ({
+	page,
+}) => {
+	await page.goto(`${BASE}/?journey=edit`);
+	await waitForEditor(page);
+	await panel(page, 'record').click();
+	await expect(panel(page, 'stop')).toBeVisible();
+
+	const suggestions = (): Promise<number> =>
+		page.evaluate(() => {
+			const steps = window.__journeyEditor?.draft().steps ?? [];
+			return steps[steps.length - 1]?.suggestions.length ?? 0;
+		});
+	await page.click('[data-journey="start"]');
+	await page.evaluate(() => {
+		document.querySelector<HTMLElement>('[data-journey="new"]')?.click();
+		window.__journeyEditor?.stop();
+	});
+
+	const settled = await suggestions();
+	expect(settled).toBeGreaterThan(0);
+	await page.waitForTimeout(600);
+	expect(await suggestions()).toBe(settled);
+});
+
 test('the picker adds an expectation from a clicked element', async ({ page }) => {
 	await recordCreateNote(page);
 	await row(page, 4).locator('[data-editor="add-expect"]').click();
