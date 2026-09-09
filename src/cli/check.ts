@@ -4,7 +4,7 @@ import { failureMessage, runConfigured } from '../playwright/index.js';
 import { ensureApp } from './app.js';
 import { loadConfig, variantLabel, variantMatrix } from './config.js';
 import { loadJourneys } from './load.js';
-import { type Argv, flagString } from './main.js';
+import { type Argv, flagString, launchOptions } from './main.js';
 
 export type Health = 'stable' | 'fallback' | 'fragile';
 
@@ -29,8 +29,9 @@ export async function runCheck(argv: Argv): Promise<number> {
 		return 1;
 	}
 	const strict = argv.flags.strict === true;
+	const launch = launchOptions(argv);
 	const stopApp = await ensureApp(loaded);
-	const browser = await chromium.launch();
+	const browser = await chromium.launch(launch);
 	let failed = 0;
 	try {
 		for (const entry of journeys) {

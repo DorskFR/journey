@@ -17,7 +17,7 @@ import {
 	viewports,
 } from './config.js';
 import { type LoadedJourney, loadJourneys } from './load.js';
-import { type Argv, flagString, REPEAT_SEPARATOR } from './main.js';
+import { type Argv, flagString, launchOptions, REPEAT_SEPARATOR } from './main.js';
 import { hasFfmpeg, storyboard, toGif, toMp4 } from './media.js';
 import {
 	type Manifest,
@@ -179,8 +179,14 @@ export async function runBook(argv: Argv): Promise<number> {
 		formats: loaded.config.video?.formats ?? DEFAULT_FORMATS,
 	};
 	const out = outDir(loaded);
+	const launch = launchOptions(argv);
+	if (!launch.headless) {
+		console.error(
+			'journey book: --headed writes to the same files as a headless run, but window chrome and frame timing differ; do not commit these captures',
+		);
+	}
 	const stopApp = await ensureApp(loaded);
-	const browser = await chromium.launch();
+	const browser = await chromium.launch(launch);
 	let failed = 0;
 	try {
 		for (const entry of selected) {

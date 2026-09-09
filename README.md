@@ -96,6 +96,20 @@ export default defineConfig({
 Paths are relative to the config file. `journey record` also saves a HAR and
 the storage state next to the journey, so it replays offline.
 
+## Watching a run
+
+`check`, `test`, `book` and `pages` drive the browser for you, headless. When a
+step fails somewhere you cannot see, `--headed` shows the window and `--slow-mo`
+gives you time to read it:
+
+```sh
+npx journey book create-note --headed --slow-mo 250
+```
+
+`journey record` is headed already; `--headless` is its opt-out. A headed `book`
+writes to the same files as a headless one, but window chrome and frame timing
+differ — treat those captures as a debugging aid, not as docs to commit.
+
 ## In the app
 
 Only needed for guide mode or the in-app editor. The runtime has no

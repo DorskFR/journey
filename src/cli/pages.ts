@@ -14,7 +14,7 @@ import {
 	variantNames,
 	viewports,
 } from './config.js';
-import { type Argv, flagString } from './main.js';
+import { type Argv, flagString, launchOptions } from './main.js';
 
 export interface PageEntry {
 	route: string;
@@ -93,8 +93,9 @@ export async function runPages(argv: Argv): Promise<number> {
 	}
 	const out = join(outDir(loaded), 'pages');
 	const sizes = viewports(loaded.config);
+	const launch = launchOptions(argv);
 	const stopApp = await ensureApp(loaded);
-	const browser = await chromium.launch();
+	const browser = await chromium.launch(launch);
 	let failed = 0;
 	const index: Array<{ name: string; route: string; keys: string[] }> = [];
 	try {
