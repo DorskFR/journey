@@ -214,6 +214,38 @@ mount({
 });
 ```
 
+## Where the step text sits
+
+By default the caption and the guide card are anchored to the target — directly
+below it, or above when there is no room. That is also where an app puts its own
+tooltips and menus, so on a step about a tooltip the callout lands on top of the
+thing the step is about.
+
+`placement: 'banner'` draws the text as a translucent strip across the bottom of
+the viewport instead, the shape subtitles use. It is never positioned from the
+target, so it cannot cover it, and it stays put from step to step.
+
+```sh
+npx journey book --placement banner
+```
+
+```ts
+export default defineConfig({ placement: 'banner' });   // or mount({ placement: 'banner' })
+```
+
+The spotlight ring, the badge and the cursor stay anchored to the target either
+way; only the text moves. The banner has its own tokens: `--journey-banner-surface`,
+`--journey-banner-text`, `--journey-banner-padding`, `--journey-banner-align` and
+`--journey-banner-inset`.
+
+The overlay itself sits in the top layer, above everything the page can stack.
+Set `--journey-z` to take it out of the top layer and into the normal stacking
+order at that z-index, so the app's own popovers can come out in front:
+
+```css
+:root { --journey-z: 5; }
+```
+
 ## Theming
 
 The overlay reads CSS custom properties, so it can be matched to the host's

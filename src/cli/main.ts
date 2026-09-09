@@ -17,7 +17,7 @@ Commands:
   check [--strict]                                   run every journey and variant
   test [playwright args...]                          run journeys through Playwright test
   record <url> [-o dir] [--no-har] [--headless]      record a journey in a browser
-  book [id...] [--presenter p] [--video] [--variant dim=value]
+  book [id...] [--presenter p] [--placement p] [--video] [--variant dim=value]
                                                      capture screenshots, video and a report per journey and variant
   pages                                              screenshot every configured page per variant
 
@@ -48,10 +48,11 @@ const COMMAND_HELP: Record<string, string> = {
   -o dir       output directory, default journeys
   --no-har     do not record a HAR file
   --headless   run headless and exit after the first export`,
-	book: `Usage: journey book [id...] [--presenter doc|guide|none] [--video] [--variant dim=value ...] [--headed] [--slow-mo ms] [--config path]
+	book: `Usage: journey book [id...] [--presenter doc|guide|none] [--placement anchored|banner] [--video] [--variant dim=value ...] [--headed] [--slow-mo ms] [--config path]
 
   id...                journeys to book, default all
   --presenter p        presenter shown in captures, default config.presenter or doc
+  --placement p        anchored beside the target, or a banner across the bottom
   --video              record tour.webm for every journey (also when a capture has video: true)
   --variant dim=value  only run variants matching, may repeat
   --headed             show the browser instead of running headless
@@ -64,7 +65,7 @@ const COMMAND_HELP: Record<string, string> = {
   --slow-mo <ms>  pause that long before each browser operation`,
 };
 
-const VALUE_FLAGS = new Set(['config', 'o', 'variant', 'presenter', 'slow-mo']);
+const VALUE_FLAGS = new Set(['config', 'o', 'variant', 'presenter', 'placement', 'slow-mo']);
 const REPEATABLE_FLAGS = new Set(['variant']);
 export const REPEAT_SEPARATOR = ',';
 

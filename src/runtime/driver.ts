@@ -1,6 +1,7 @@
 import type { Capture, Interaction, IR } from '../core/types.js';
 import { DriverActor, type DriverYield } from './actors.js';
 import { Engine, type Pace, type Presenter, type RunResult } from './engine.js';
+import type { Placement } from './overlay.js';
 import { clearProgress, readProgress, writeProgress } from './progress.js';
 import type { Params, Translate } from './text.js';
 
@@ -8,6 +9,7 @@ export interface LoadOptions {
 	params: Params;
 	variant: Record<string, string>;
 	presenter: 'none' | 'doc' | 'guide';
+	placement?: Placement;
 	mask?: boolean;
 	masks?: string[];
 	pace?: Pace;
@@ -42,6 +44,7 @@ export interface Driver {
 
 export interface DriverHost {
 	presenter(name: LoadOptions['presenter']): Presenter;
+	place?(placement: Placement): void;
 	translate?: Translate;
 	probes?: Record<string, () => unknown | Promise<unknown>>;
 	track?: (event: string, data: Record<string, unknown>) => void;
@@ -116,6 +119,7 @@ export function createDriver(host: DriverHost): Driver {
 				session.engine.stop();
 				host.onEngine?.(null);
 			}
+			host.place?.(opts.placement ?? 'anchored');
 			const progress = await readProgress();
 			const resumed =
 				progress &&

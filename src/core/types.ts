@@ -144,6 +144,7 @@ export interface Config {
 	mask?: TargetPath[];
 	storageState?: string;
 	presenter?: 'doc' | 'guide' | 'none';
+	placement?: 'anchored' | 'banner';
 	video?: { size?: { width: number; height: number }; formats?: Array<'webm' | 'mp4' | 'gif'> };
 	pace?: { beforeAction?: number; afterSettle?: number };
 }

@@ -4,7 +4,7 @@ import { VERSION } from '../version.js';
 import { domActor, humanActor, steppedActor } from './actors.js';
 import { createDriver, MODE as DRIVER_MODE, type Driver } from './driver.js';
 import { type Actor, Engine, type NavigateHook, type Presenter, type RunResult } from './engine.js';
-import { createOverlay, type Overlay } from './overlay.js';
+import { createOverlay, type Overlay, type Placement } from './overlay.js';
 import { docPresenter, guidePresenter, nonePresenter } from './presenters.js';
 import { clearProgress, readProgress, writeProgress } from './progress.js';
 import {
@@ -52,6 +52,7 @@ export interface MountOptions {
 	navigate?: NavigateHook;
 	storage?: JourneyStorage;
 	presenter?: Presenter | ((name: PresenterName) => Presenter);
+	placement?: Placement;
 }
 
 export type PresenterName = 'none' | 'doc' | 'guide';
@@ -158,8 +159,13 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		return builtin(name);
 	};
 
+	if (options.placement) overlay.placement = options.placement;
+
 	const driver = createDriver({
 		presenter: presenterFor,
+		place: (placement) => {
+			overlay.placement = options.placement ?? placement;
+		},
 		translate: options.translate,
 		probes: options.probes,
 		track: options.track,
