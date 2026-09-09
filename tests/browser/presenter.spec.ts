@@ -251,3 +251,33 @@ test('a step cannot take the presenter away from a human', async ({ page }) => {
 	await page.evaluate(() => (window as unknown as { __run: Promise<unknown> }).__run);
 	expect(await log(page)).toEqual(['guide:show:one', 'guide:show:two', 'guide:hide']);
 });
+
+test('the cursor settles even when its transition never runs', async ({ page }) => {
+	await page.evaluate(() => {
+		const runtime = (window as unknown as { journeyRuntime: Runtime }).journeyRuntime;
+		runtime.mount({});
+	});
+	await waitForApi(page);
+	const settled = await page.evaluate(async () => {
+		const api = window.__journey as NonNullable<typeof window.__journey>;
+		const runtime = (window as unknown as { journeyRuntime: Runtime }).journeyRuntime;
+		const presenter = runtime.docPresenter(api.overlay);
+		const move = presenter.moveCursor as (el: Element) => Promise<void>;
+		const one = document.createElement('div');
+		one.style.cssText = 'position:fixed;top:10px;left:10px;width:20px;height:20px';
+		const two = document.createElement('div');
+		two.style.cssText = 'position:fixed;top:400px;left:400px;width:20px;height:20px';
+		document.body.append(one, two);
+		await move(one);
+		// display:none suppresses the transition, so neither event ever fires.
+		api.overlay.parts.cursor.style.display = 'none';
+		const start = Date.now();
+		const raced = await Promise.race([
+			move(two).then(() => 'settled'),
+			new Promise((r) => setTimeout(() => r('hung'), 4000)),
+		]);
+		return { raced, elapsed: Date.now() - start };
+	});
+	expect(settled.raced).toBe('settled');
+	expect(settled.elapsed).toBeLessThan(2000);
+});
