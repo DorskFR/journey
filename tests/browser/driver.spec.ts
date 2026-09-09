@@ -101,3 +101,17 @@ test('book mode applies masks and crops captures to the target', async ({ page }
 	expect(cropped).toBeGreaterThan(0);
 	expect(cropped).toBeLessThan(full);
 });
+
+test('a step holds for its own pace', async ({ page }) => {
+	const paced: IR = {
+		...createNoteIR,
+		steps: createNoteIR.steps.map((s) =>
+			s.id === 'new' ? { ...s, pace: { beforeAction: 400, afterSettle: 400 } } : s,
+		),
+	};
+	const start = Date.now();
+	const result = await runJourney(page, paced, { baseUrl: BASE, params });
+	const elapsed = Date.now() - start;
+	expect(result.ok).toBe(true);
+	expect(elapsed).toBeGreaterThanOrEqual(800);
+});

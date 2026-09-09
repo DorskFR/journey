@@ -52,6 +52,12 @@ export interface Capture {
 
 export type Guide = 'wait-for-user' | 'next';
 export type Level = 'smoke' | 'checked' | 'visual';
+export type PresenterName = 'doc' | 'spot' | 'guide' | 'none';
+
+export interface Pace {
+	beforeAction?: number;
+	afterSettle?: number;
+}
 
 export interface Step {
 	id: string;
@@ -67,6 +73,8 @@ export interface Step {
 	optional?: boolean;
 	timeout?: number;
 	qaOnly?: boolean;
+	presenter?: PresenterName;
+	pace?: Pace;
 }
 
 export interface Journey {
@@ -143,8 +151,8 @@ export interface Config {
 	pages?: Array<string | { route: string; name?: string; variants?: Record<string, string[]> }>;
 	mask?: TargetPath[];
 	storageState?: string;
-	presenter?: 'doc' | 'spot' | 'guide' | 'none';
+	presenter?: PresenterName;
 	placement?: 'anchored' | 'banner';
 	video?: { size?: { width: number; height: number }; formats?: Array<'webm' | 'mp4' | 'gif'> };
-	pace?: { beforeAction?: number; afterSettle?: number };
+	pace?: Pace;
 }

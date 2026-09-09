@@ -99,3 +99,29 @@ test('rejects non-objects', () => {
 	expect(validate(null).ok).toBe(false);
 	expect(validate([]).ok).toBe(false);
 });
+
+test('accepts a per-step presenter and pace', () => {
+	const j = {
+		id: 'j',
+		steps: [{ id: 'a', presenter: 'none', pace: { beforeAction: 0, afterSettle: 2500 } }],
+	};
+	expect(validate(j)).toEqual({ ok: true, errors: [] });
+});
+
+test('rejects a bad per-step presenter and pace', () => {
+	const j = {
+		id: 'j',
+		steps: [
+			{ id: 'a', presenter: 'quiet' },
+			{ id: 'b', pace: { afterSettle: -1 } },
+			{ id: 'c', pace: { slow: 1 } },
+			{ id: 'd', pace: 300 },
+		],
+	};
+	expect(paths(j)).toEqual([
+		'steps[0].presenter',
+		'steps[1].pace.afterSettle',
+		'steps[2].pace.slow',
+		'steps[3].pace',
+	]);
+});

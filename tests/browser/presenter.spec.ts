@@ -192,3 +192,62 @@ test.describe('the spot presenter', () => {
 		).toContain('spot');
 	});
 });
+
+const OVERRIDDEN: Journey = {
+	id: 'hosted',
+	version: 1,
+	route: '/',
+	steps: [
+		{ id: 'one', say: { title: 'One' } },
+		{ id: 'two', presenter: 'spot', say: { title: 'Two' } },
+	],
+};
+
+async function mountRecorder(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const runtime = (window as unknown as { journeyRuntime: Runtime }).journeyRuntime;
+		const log: string[] = [];
+		(window as unknown as { __log: string[] }).__log = log;
+		let advance: (() => void) | null = null;
+		(window as unknown as { __next: () => void }).__next = () => advance?.();
+		runtime.mount({
+			presenter: (name) => ({
+				show(step, _el, ctx) {
+					log.push(`${name}:show:${step.id}`);
+					advance = ctx.next;
+				},
+				settle() {},
+				hide() {
+					log.push(`${name}:hide`);
+				},
+			}),
+		});
+	});
+	await waitForApi(page);
+	await page.evaluate((journey) => window.__journey?.register([journey]), OVERRIDDEN);
+}
+
+function log(page: Page): Promise<string[]> {
+	return page.evaluate(() => (window as unknown as { __log: string[] }).__log);
+}
+
+test('a step picks its own presenter when the run is scripted', async ({ page }) => {
+	await mountRecorder(page);
+	await page.evaluate(() => window.__journey?.start('hosted', { mode: 'run' }));
+	expect(await log(page)).toEqual(['none:show:one', 'none:hide', 'spot:show:two', 'spot:hide']);
+});
+
+test('a step cannot take the presenter away from a human', async ({ page }) => {
+	await mountRecorder(page);
+	await page.evaluate(() => {
+		(window as unknown as { __run: Promise<unknown> }).__run = window.__journey?.start('hosted', {
+			mode: 'guide',
+		}) as Promise<unknown>;
+	});
+	await expect.poll(() => log(page)).toContain('guide:show:one');
+	await page.evaluate(() => (window as unknown as { __next: () => void }).__next());
+	await expect.poll(() => log(page)).toContain('guide:show:two');
+	await page.evaluate(() => (window as unknown as { __next: () => void }).__next());
+	await page.evaluate(() => (window as unknown as { __run: Promise<unknown> }).__run);
+	expect(await log(page)).toEqual(['guide:show:one', 'guide:show:two', 'guide:hide']);
+});

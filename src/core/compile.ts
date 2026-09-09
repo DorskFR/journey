@@ -26,6 +26,8 @@ function compileStep(step: Step, isPublic: boolean): IRStep {
 	if (step.when !== undefined) out.when = step.when;
 	if (step.optional !== undefined) out.optional = step.optional;
 	if (step.qaOnly !== undefined) out.qaOnly = step.qaOnly;
+	if (step.presenter !== undefined) out.presenter = step.presenter;
+	if (step.pace !== undefined) out.pace = step.pace;
 	return out;
 }
 

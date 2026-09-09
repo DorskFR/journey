@@ -1,5 +1,5 @@
 import { compile } from '../core/compile.js';
-import type { IR, Journey, Text } from '../core/types.js';
+import type { IR, Journey, PresenterName, Text } from '../core/types.js';
 import { VERSION } from '../version.js';
 import { domActor, humanActor, steppedActor } from './actors.js';
 import { createDriver, MODE as DRIVER_MODE, type Driver } from './driver.js';
@@ -54,8 +54,6 @@ export interface MountOptions {
 	presenter?: Presenter | ((name: PresenterName) => Presenter);
 	placement?: Placement;
 }
-
-export type PresenterName = 'none' | 'doc' | 'spot' | 'guide';
 
 export interface StartOptions {
 	mode?: Mode;
@@ -197,6 +195,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 						? localized(steppedActor, t)
 						: domActor,
 			presenter: presenterFor(mode === 'run' ? 'none' : 'guide'),
+			presenterFor,
 			params,
 			variant,
 			translate: options.translate,

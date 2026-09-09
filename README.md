@@ -236,6 +236,36 @@ a video carrying its own narration, where the on-screen text would repeat it.
 The journey keeps its `say` text: the manifest and the report still carry each
 capture's title and body.
 
+A single step can overrule the choice. `presenter` on a step swaps the
+presenter for that step alone and restores it afterwards — `'none'` for a step
+whose callout would sit on the thing it is about, `'spot'` where the caption
+would repeat narration already on screen:
+
+```ts
+{ id: 'key', target: 'settings/api-key', do: { kind: 'hover' }, presenter: 'none' }
+```
+
+## How long each step is held
+
+`pace` holds the run either side of the action: `beforeAction` after the target
+is lit and before the actor touches it, `afterSettle` once the expectations pass
+and the capture is taken. Set it in the config for the whole run, and on a step
+to overrule it there — long enough to read a dense caption, or zero for a step
+that only exists to get somewhere.
+
+```ts
+export default defineConfig({ pace: { beforeAction: 600, afterSettle: 2500 } });
+```
+
+```ts
+{ id: 'summary', say: { body: 'The long one.' }, pace: { afterSettle: 5000 } }
+```
+
+Both `presenter` and `pace` on a step apply to scripted runs — `book`, the
+Playwright runner, `mount` in run mode. A guided or preview run ignores them:
+there the presenter is the only way a person has through the journey, so a step
+may not take it away or stall them.
+
 ## Where the step text sits
 
 By default the caption and the guide card are anchored to the target — directly

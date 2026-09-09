@@ -71,3 +71,14 @@ test('IR is plain JSON', () => {
 test('throws on an invalid journey', () => {
 	expect(() => compile({ id: 'x', steps: [{ id: 'a' }, { id: 'a' }] })).toThrow('steps[1].id');
 });
+
+test('carries a per-step presenter and pace into the IR', () => {
+	const ir = compile({
+		...journey,
+		steps: [{ id: 'a', presenter: 'none', pace: { afterSettle: 2500 } }, { id: 'b' }],
+	});
+	expect(ir.steps[0]?.presenter).toBe('none');
+	expect(ir.steps[0]?.pace).toEqual({ afterSettle: 2500 });
+	expect(ir.steps[1]).not.toHaveProperty('presenter');
+	expect(ir.steps[1]).not.toHaveProperty('pace');
+});

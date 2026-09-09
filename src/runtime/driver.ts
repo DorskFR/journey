@@ -1,4 +1,4 @@
-import type { Capture, Interaction, IR } from '../core/types.js';
+import type { Capture, Interaction, IR, PresenterName } from '../core/types.js';
 import { DriverActor, type DriverYield } from './actors.js';
 import { Engine, type Pace, type Presenter, type RunResult } from './engine.js';
 import type { Placement } from './overlay.js';
@@ -8,7 +8,7 @@ import type { Params, Translate } from './text.js';
 export interface LoadOptions {
 	params: Params;
 	variant: Record<string, string>;
-	presenter: 'none' | 'doc' | 'spot' | 'guide';
+	presenter: PresenterName;
 	placement?: Placement;
 	mask?: boolean;
 	masks?: string[];
@@ -43,7 +43,7 @@ export interface Driver {
 }
 
 export interface DriverHost {
-	presenter(name: LoadOptions['presenter']): Presenter;
+	presenter(name: PresenterName): Presenter;
 	place?(placement: Placement): void;
 	translate?: Translate;
 	probes?: Record<string, () => unknown | Promise<unknown>>;
@@ -133,6 +133,7 @@ export function createDriver(host: DriverHost): Driver {
 			const engine = new Engine(ir, {
 				actor,
 				presenter: host.presenter(opts.presenter),
+				presenterFor: host.presenter,
 				params: opts.params,
 				variant: opts.variant,
 				translate: host.translate,
