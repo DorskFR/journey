@@ -143,7 +143,7 @@ export interface Config {
 	pages?: Array<string | { route: string; name?: string; variants?: Record<string, string[]> }>;
 	mask?: TargetPath[];
 	storageState?: string;
-	presenter?: 'doc' | 'guide' | 'none';
+	presenter?: 'doc' | 'spot' | 'guide' | 'none';
 	placement?: 'anchored' | 'banner';
 	video?: { size?: { width: number; height: number }; formats?: Array<'webm' | 'mp4' | 'gif'> };
 	pace?: { beforeAction?: number; afterSettle?: number };

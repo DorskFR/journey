@@ -48,10 +48,12 @@ const COMMAND_HELP: Record<string, string> = {
   -o dir       output directory, default journeys
   --no-har     do not record a HAR file
   --headless   run headless and exit after the first export`,
-	book: `Usage: journey book [id...] [--presenter doc|guide|none] [--placement anchored|banner] [--video] [--variant dim=value ...] [--headed] [--slow-mo ms] [--config path]
+	book: `Usage: journey book [id...] [--presenter doc|spot|guide|none] [--placement anchored|banner] [--video] [--variant dim=value ...] [--headed] [--slow-mo ms] [--config path]
 
   id...                journeys to book, default all
   --presenter p        presenter shown in captures, default config.presenter or doc
+                       doc ring, badge and caption; spot the same without the caption;
+                       guide a card with Next and Exit; none nothing
   --placement p        anchored beside the target, or a banner across the bottom
   --video              record tour.webm for every journey (also when a capture has video: true)
   --variant dim=value  only run variants matching, may repeat

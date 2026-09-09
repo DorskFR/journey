@@ -32,7 +32,8 @@ seats change what a run means:
   the target. `dom` dispatches synthetic events. `driver` hands the action to
   a host (Playwright) that performs trusted input.
 - Presenter: what a human sees. `none`, `guide` (spotlight, card, Next/Exit),
-  `doc` (numbered callout, no dimming, visible cursor), `editor` (panel).
+  `doc` (numbered callout, no dimming, visible cursor), `spot` (`doc` with no
+  caption), `editor` (panel).
 
 ## 2. Layout
 
@@ -52,7 +53,7 @@ src/
     resolve.ts             resolveOne, resolveAll, accessible name/role
     engine.ts              Engine class, step loop, events
     actors.ts              humanActor, domActor, driverActor
-    presenters.ts          nonePresenter, guidePresenter, docPresenter, cursor
+    presenters.ts          nonePresenter, guidePresenter, docPresenter, spotPresenter, cursor
     progress.ts            sessionStorage persistence
     mask.ts                masking for capture
     driver.ts              window.__journey.driver protocol
@@ -205,7 +206,7 @@ export interface Config {
 	pages?: Array<string | { route: string; name?: string; variants?: Record<string, string[]> }>;
 	mask?: TargetPath[];
 	storageState?: string;
-	presenter?: 'doc' | 'guide' | 'none';  // book default 'doc'
+	presenter?: 'doc' | 'spot' | 'guide' | 'none';  // book default 'doc'
 	video?: { size?: { width: number; height: number }; formats?: Array<'webm' | 'mp4' | 'gif'> };
 	pace?: { beforeAction?: number; afterSettle?: number };  // book only, ms, default 600 / 800
 }
@@ -424,7 +425,7 @@ with `box-shadow: 0 0 0 3px <accent>, 0 0 0 9999px rgba(0,0,0,.55)` for
 guide; for doc only the outline and a numbered badge), `card` (title, body,
 "Step i of n", buttons Next and Exit), `cursor` (SVG arrow, CSS transition
 350 ms), `ripple` (expanding ring on click), `toast` (keystroke callout,
-bottom right), `caption` (doc presenter text near the target), and a `panel`
+bottom right), `caption` (doc presenter text near the target, never drawn by spot), and a `panel`
 slot the editor fills. Cursor and ripple are hidden for the human actor.
 Positions are recomputed on `resize` and `scroll` (capture phase) while a
 step is shown. Escape exits a guide run only for the human actor; driven and
@@ -533,7 +534,7 @@ permitted, dispatches `window` event `journey:export` with
 
 ```ts
 interface Driver {
-	load(ir: Journey, opts: { params: Record<string, string>; variant: Record<string, string>; presenter: 'none' | 'doc' | 'guide'; mask?: boolean; pace?: Pace; from?: number }): Promise<{ resumedAt: number | null }>;
+	load(ir: Journey, opts: { params: Record<string, string>; variant: Record<string, string>; presenter: 'none' | 'doc' | 'spot' | 'guide'; mask?: boolean; pace?: Pace; from?: number }): Promise<{ resumedAt: number | null }>;
 	step(): Promise<
 		| { done: true; result: RunResult }
 		| { done: false; stepId: string; index: number; route: string }
@@ -622,7 +623,7 @@ or cross.
   `<dir>/fixtures/<id>.storage.json` when the export event arrives, writes
   `<dir>/<id>.journey.ts`, prints the paths, keeps the browser open until it
   is closed. Default dir: `journeys`.
-- `book [id...] [--presenter doc|guide] [--video] [--variant dim=value]`: journeys
+- `book [id...] [--presenter doc|spot|guide|none] [--video] [--variant dim=value]`: journeys
   are compiled with `public: true` because the book is customer-facing; for
   each journey and variant runs with the chosen presenter, captures every
   capture step to `<out>/<id>/<variantKey>/<NN>-<name>.png`, records

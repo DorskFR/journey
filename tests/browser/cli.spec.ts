@@ -214,6 +214,32 @@ test.describe('book and pages', () => {
 		}
 	});
 
+	test('book with the spot presenter keeps the say text in the manifest', async () => {
+		test.setTimeout(120000);
+		const run = await journey([
+			'book',
+			'--presenter',
+			'spot',
+			'settings-theme',
+			'--config',
+			config,
+		]);
+		expect(run.code, run.stderr).toBe(0);
+		const key = variantKey(variantMatrix(demoConfig, settingsThemeIR)[0] as Record<string, string>);
+		const dir = join(out, 'settings-theme', key);
+		expect(existsSync(join(dir, '01-dark.png'))).toBe(true);
+		const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
+		const captures = manifest.variants[key]?.captures ?? [];
+		expect(captures).toHaveLength(1);
+		expect(captures[0]?.title).toBeTruthy();
+	});
+
+	test('an unknown presenter names the ones that exist', async () => {
+		const run = await journey(['book', '--presenter', 'nope', '--config', config]);
+		expect(run.code).toBe(1);
+		expect(run.stderr).toContain('unknown presenter "nope"');
+	});
+
 	test('pages screenshots every configured route per variant and writes an index', async () => {
 		test.setTimeout(120000);
 		const run = await journey(['pages', '--config', config]);
@@ -238,6 +264,7 @@ test.describe('book and pages', () => {
 		const book = await journey(['book', '--help']);
 		expect(book.code).toBe(0);
 		expect(book.stdout).toContain('--variant dim=value');
+		expect(book.stdout).toContain('doc|spot|guide|none');
 		const pages = await journey(['pages', '--help']);
 		expect(pages.code).toBe(0);
 		expect(pages.stdout).toContain('Usage: journey pages');

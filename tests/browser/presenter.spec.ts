@@ -1,6 +1,15 @@
 import { expect, type Page, test } from '@playwright/test';
 import type { Journey } from '../../src/index.js';
-import { BASE, RUNTIME_INIT, waitForApi } from './helpers.js';
+import {
+	BASE,
+	createNoteIR,
+	defaultLoad,
+	driverLoad,
+	driverStep,
+	mountRuntime,
+	RUNTIME_INIT,
+	waitForApi,
+} from './helpers.js';
 
 type Runtime = typeof import('../../src/runtime/index.js');
 
@@ -134,4 +143,52 @@ test('without the option the built-in card still renders', async ({ page }) => {
 	expect(await visibleParts(page)).toEqual(['card']);
 	await card.locator('button.next').click();
 	await expect(card).toContainText('Two');
+});
+
+test.describe('the spot presenter', () => {
+	async function firstStep(page: Page, presenter: 'doc' | 'spot'): Promise<void> {
+		await mountRuntime(page);
+		await waitForApi(page);
+		await driverLoad(page, createNoteIR, { ...defaultLoad, presenter });
+		await driverStep(page);
+	}
+
+	function captionText(page: Page): Promise<string> {
+		return page.evaluate(
+			() =>
+				(window.__journey as NonNullable<typeof window.__journey>).overlay.parts.caption
+					.textContent ?? '',
+		);
+	}
+
+	test('draws the ring and the badge but never the caption', async ({ page }) => {
+		await firstStep(page, 'spot');
+		expect(await visibleParts(page)).toEqual(['spot', 'badge', 'cursor']);
+		expect(await captionText(page)).toBe('');
+	});
+
+	test('doc draws the caption for the same step', async ({ page }) => {
+		await firstStep(page, 'doc');
+		expect(await visibleParts(page)).toContain('caption');
+		expect(await captionText(page)).not.toBe('');
+	});
+
+	test('a host presenter factory is asked for spot by name', async ({ page }) => {
+		await page.evaluate(() => {
+			const runtime = (window as unknown as { journeyRuntime: Runtime }).journeyRuntime;
+			const names: string[] = [];
+			(window as unknown as { __names: string[] }).__names = names;
+			runtime.mount({
+				presenter: (name) => {
+					names.push(name);
+					return runtime.nonePresenter;
+				},
+			});
+		});
+		await waitForApi(page);
+		await driverLoad(page, createNoteIR, { ...defaultLoad, presenter: 'spot' });
+		expect(
+			await page.evaluate(() => (window as unknown as { __names: string[] }).__names),
+		).toContain('spot');
+	});
 });

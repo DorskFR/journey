@@ -29,11 +29,11 @@ import {
 	writeReport,
 } from './report.js';
 
-export type Presenter = 'doc' | 'guide' | 'none';
+export type Presenter = 'doc' | 'spot' | 'guide' | 'none';
 export type Placement = 'anchored' | 'banner';
 
 export const DEFAULT_FORMATS: VideoFormat[] = ['webm', 'mp4'];
-const PRESENTERS: Presenter[] = ['doc', 'guide', 'none'];
+const PRESENTERS: Presenter[] = ['doc', 'spot', 'guide', 'none'];
 const PLACEMENTS: Placement[] = ['anchored', 'banner'];
 
 export function parseVariantFilter(value: string | undefined): Record<string, string> {

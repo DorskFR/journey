@@ -29,7 +29,7 @@ export interface RunOptions {
 	params?: Record<string, string>;
 	variant?: Record<string, string>;
 	viewports?: Record<string, Viewport>;
-	presenter?: 'none' | 'doc' | 'guide';
+	presenter?: 'none' | 'doc' | 'spot' | 'guide';
 	placement?: LoadOptions['placement'];
 	mask?: boolean;
 	masks?: string[];

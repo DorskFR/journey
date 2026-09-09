@@ -5,7 +5,7 @@ import { domActor, humanActor, steppedActor } from './actors.js';
 import { createDriver, MODE as DRIVER_MODE, type Driver } from './driver.js';
 import { type Actor, Engine, type NavigateHook, type Presenter, type RunResult } from './engine.js';
 import { createOverlay, type Overlay, type Placement } from './overlay.js';
-import { docPresenter, guidePresenter, nonePresenter } from './presenters.js';
+import { docPresenter, guidePresenter, nonePresenter, spotPresenter } from './presenters.js';
 import { clearProgress, readProgress, writeProgress } from './progress.js';
 import {
 	accessibleName,
@@ -55,7 +55,7 @@ export interface MountOptions {
 	placement?: Placement;
 }
 
-export type PresenterName = 'none' | 'doc' | 'guide';
+export type PresenterName = 'none' | 'doc' | 'spot' | 'guide';
 
 export interface StartOptions {
 	mode?: Mode;
@@ -149,6 +149,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 
 	const builtin = (name: PresenterName): Presenter => {
 		if (name === 'doc') return docPresenter(overlay, t);
+		if (name === 'spot') return spotPresenter(overlay, t);
 		if (name === 'guide') return guidePresenter(overlay, t);
 		return nonePresenter;
 	};
