@@ -47,12 +47,12 @@ export async function waitForUrl(
 ): Promise<void> {
 	const deadline = Date.now() + timeout;
 	while (Date.now() < deadline) {
+		if (await answers(url)) return;
 		if (child && child.exitCode !== null) {
 			throw new Error(
 				`journey: command exited with code ${child.exitCode} before ${url} was ready`,
 			);
 		}
-		if (await answers(url)) return;
 		await new Promise((r) => setTimeout(r, 250));
 	}
 	throw new Error(`journey: ${url} did not answer 200 within ${timeout} ms`);
