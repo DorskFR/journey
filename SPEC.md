@@ -365,7 +365,10 @@ Per step:
    `step.pace`: the presenter is the only way through the run for a person, so
    a step may not take it away or stall them.
 6. Apply masks (section 5.3), wait `step.pace.beforeAction ?? pace.beforeAction`,
-   move the cursor to the element if the presenter has one.
+   move the cursor to the element if the presenter has one. `moveCursor`
+   resolves on `transitionend`, on `transitioncancel`, or on a timer just past
+   the transition it asked for: a transition that never starts fires neither
+   event, and no caller has a timeout, so the run would hang on the step.
 7. `actor.perform(step, el)`; the engine draws the click ripple when the actor
    reports completion.
 8. Wait for all expectations, polling every 100 ms up to `timeout`. A failing
@@ -433,10 +436,15 @@ guide; for doc only the outline and a numbered badge), `card` (title, body,
 350 ms), `ripple` (expanding ring on click), `toast` (keystroke callout,
 bottom right), `caption` (doc presenter text near the target, never drawn by spot), and a `panel`
 slot the editor fills. Cursor and ripple are hidden for the human actor.
-Positions are recomputed on `resize` and `scroll` (capture phase) while a
-step is shown. Escape exits a guide run only for the human actor; driven and
-preview runs ignore it so a scripted Escape keystroke is not an exit. The spotlight scrolls the target
-into view (`scrollIntoView({ block: 'center' })`) before measuring.
+Positions are recomputed on `resize`, on `scroll` (capture phase), and on
+every animation frame while a target is tracked: fonts and images load,
+banners inject and smooth scrolls stay in flight without reporting any event,
+and a rect measured once leaves the box on the wrong element. The per-frame
+pass re-measures only, and lays out again only when the rect changed. The
+`spot` transition is 80 ms so a correction cannot slide across the page.
+Escape exits a guide run only for the human actor; driven and preview runs
+ignore it so a scripted Escape keystroke is not an exit. The spotlight scrolls
+the target into view (`scrollIntoView({ block: 'center' })`) before measuring.
 
 Presenter factories take the `t(key, vars)` helper built from `strings`
 (`guidePresenter(overlay, t)`, `docPresenter(overlay, t)`) and interpolate

@@ -109,12 +109,22 @@ function cursorPresenter(overlay: Overlay): Pick<Presenter, 'moveCursor' | 'ripp
 				cursor.style.transition = '';
 				return Promise.resolve();
 			}
-			const duration = Number.parseFloat(getComputedStyle(cursor).transitionDuration);
+			const style = getComputedStyle(cursor);
+			const duration = Number.parseFloat(style.transitionDuration);
 			if (!moved || !(duration > 0)) return Promise.resolve();
+			const delay = Number.parseFloat(style.transitionDelay) || 0;
+			// A transition that never starts fires neither event, and no caller has a
+			// timeout, so without this the run hangs on the step forever.
 			return new Promise((resolve) => {
-				const done = (): void => resolve();
-				cursor.addEventListener('transitionend', done, { once: true });
-				cursor.addEventListener('transitioncancel', done, { once: true });
+				const timer = setTimeout(done, (duration + Math.max(delay, 0)) * 1000 + 250);
+				function done(): void {
+					clearTimeout(timer);
+					cursor.removeEventListener('transitionend', done);
+					cursor.removeEventListener('transitioncancel', done);
+					resolve();
+				}
+				cursor.addEventListener('transitionend', done);
+				cursor.addEventListener('transitioncancel', done);
 			});
 		},
 		ripple(el) {

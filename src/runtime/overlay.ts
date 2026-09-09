@@ -30,7 +30,7 @@ const CSS_TEXT = `
 *{box-sizing:border-box}
 .spot,.badge,.caption,.toast,.cursor,.ripple{pointer-events:none}
 [hidden]{display:none!important}
-.spot{position:absolute;border-radius:var(--journey-radius-sm,6px);box-shadow:0 0 0 3px var(--journey-accent,#ffd166),0 0 0 9999px var(--journey-scrim,rgba(0,0,0,.55));transition:top .25s,left .25s,width .25s,height .25s}
+.spot{position:absolute;border-radius:var(--journey-radius-sm,6px);box-shadow:0 0 0 3px var(--journey-accent,#ffd166),0 0 0 9999px var(--journey-scrim,rgba(0,0,0,.55));transition:top .08s,left .08s,width .08s,height .08s}
 .spot.doc{box-shadow:0 0 0 3px var(--journey-accent,#ffd166)}
 .badge{position:absolute;min-width:26px;height:26px;padding:0 8px;border-radius:13px;background:var(--journey-accent,#ffd166);color:var(--journey-accent-ink,#111);font-weight:700;line-height:26px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3)}
 .card{position:absolute;width:320px;max-width:calc(100vw - 24px);padding:16px;border-radius:var(--journey-radius,8px);background:var(--journey-surface,#fff);color:var(--journey-text,#111);box-shadow:var(--journey-shadow,0 8px 24px rgba(0,0,0,.25));pointer-events:none}
@@ -94,6 +94,8 @@ class OverlayImpl implements Overlay {
 		togglePopover: TogglePopover;
 	} | null = null;
 	private mode: Placement = 'anchored';
+	private frame = 0;
+	private measured = '';
 	private readonly onLayout = (): void => {
 		if (this.current) this.layout();
 	};
@@ -203,11 +205,14 @@ class OverlayImpl implements Overlay {
 		}
 		window.removeEventListener('resize', this.onLayout);
 		window.removeEventListener('scroll', this.onLayout, true);
+		cancelAnimationFrame(this.frame);
+		this.frame = 0;
 		this.hostEl?.remove();
 		this.hostEl = null;
 		this.rootEl = null;
 		this.partEls = null;
 		this.current = null;
+		this.measured = '';
 	}
 
 	target(): DOMRect | null {
@@ -220,6 +225,27 @@ class OverlayImpl implements Overlay {
 		this.current = el;
 		if (el && options.scroll !== false) el.scrollIntoView({ block: 'center', inline: 'nearest' });
 		this.layout();
+		this.follow();
+	}
+
+	// Scroll and resize are not the only ways a target moves: fonts and images
+	// load, banners inject, a smooth scroll is still in flight. Nothing reports
+	// those, so a tracked target is re-measured every frame.
+	private follow(): void {
+		cancelAnimationFrame(this.frame);
+		this.frame = 0;
+		if (!this.current || typeof requestAnimationFrame !== 'function') return;
+		const tick = (): void => {
+			if (!this.current) {
+				this.frame = 0;
+				return;
+			}
+			const rect = this.target();
+			const key = rect ? `${rect.top},${rect.left},${rect.width},${rect.height}` : '';
+			if (key !== this.measured) this.layout();
+			this.frame = requestAnimationFrame(tick);
+		};
+		this.frame = requestAnimationFrame(tick);
 	}
 
 	layout(): void {
@@ -229,6 +255,7 @@ class OverlayImpl implements Overlay {
 		const vw = window.innerWidth;
 		const vh = window.innerHeight;
 		const anchored = rect ? '' : 'hidden';
+		this.measured = rect ? `${rect.top},${rect.left},${rect.width},${rect.height}` : '';
 		for (const name of ['spot', 'badge', 'cursor', 'ripple'] as const) {
 			parts[name].style.visibility = anchored;
 		}

@@ -60,3 +60,31 @@ test('the spotlight ring and scrim follow their tokens', async ({ page }) => {
 	expect(shadow).toContain('rgb(0, 255, 0)');
 	expect(shadow).toContain('rgba(1, 2, 3, 0.5)');
 });
+
+test('the highlight follows a target that moves without a scroll or a resize', async ({ page }) => {
+	const boxes = await page.evaluate(async () => {
+		const api = window.__journey as NonNullable<typeof window.__journey>;
+		const target = document.createElement('div');
+		target.style.cssText = 'width:120px;height:40px;background:#333';
+		document.body.append(target);
+		api.overlay.track(target, { scroll: false });
+		const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
+		await frame();
+		const before = api.overlay.parts.spot.style.top;
+		const pusher = document.createElement('div');
+		pusher.style.cssText = 'height:300px';
+		target.before(pusher);
+		for (let i = 0; i < 4; i++) await frame();
+		return {
+			before,
+			after: Number.parseFloat(api.overlay.parts.spot.style.top),
+			rect: target.getBoundingClientRect().top - 6,
+		};
+	});
+	expect(boxes.after).not.toBeCloseTo(Number.parseFloat(boxes.before), 0);
+	expect(boxes.after).toBeCloseTo(boxes.rect, 1);
+});
+
+test('the highlight settles fast enough not to slide across the page', async ({ page }) => {
+	expect(await styleOf(page, 'spot', 'transition-duration')).toBe('0.08s, 0.08s, 0.08s, 0.08s');
+});
