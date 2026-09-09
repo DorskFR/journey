@@ -1,4 +1,13 @@
-import type { Capture, Expectation, Interaction, IR, IRStep, Target } from '../core/types.js';
+import type {
+	Capture,
+	Expectation,
+	Interaction,
+	IR,
+	IRStep,
+	Pace,
+	PresenterName,
+	Target,
+} from '../core/types.js';
 import { Masker } from './mask.js';
 import { describeTarget, resolveAll, resolveOne } from './resolve.js';
 import {
@@ -11,10 +20,7 @@ import {
 	type Translate,
 } from './text.js';
 
-export interface Pace {
-	beforeAction?: number;
-	afterSettle?: number;
-}
+export type { Pace, PresenterName };
 
 export interface RunResult {
 	ok: boolean;
@@ -80,6 +86,7 @@ export interface ProgressSink {
 export interface EngineDeps {
 	actor: Actor;
 	presenter: Presenter;
+	presenterFor?: (name: PresenterName) => Presenter;
 	params: Params;
 	variant: Record<string, string>;
 	translate?: Translate;
@@ -421,6 +428,16 @@ export class Engine {
 		this.exitRequested = false;
 		this.controller = new AbortController();
 		const { actor, presenter, pace, progress } = this.deps;
+		// A human drives through the presenter, so a step may not take it away from them.
+		const scripted: boolean = actor.human !== true && actor.stepped !== true;
+		let visible: Presenter = presenter;
+		const presenterOf = (step: IRStep): Presenter => {
+			const pick = this.deps.presenterFor;
+			if (!scripted || !pick || step.presenter === undefined) return presenter;
+			return pick(step.presenter);
+		};
+		const paceOf = (step: IRStep, phase: keyof Pace): number =>
+			(scripted ? step.pace?.[phase] : undefined) ?? pace?.[phase] ?? 0;
 		const result: RunResult = { ok: true, completed: 0, failures: [] };
 		const steps = this.ir.steps;
 		const exit = (): void => this.stop();
@@ -441,10 +458,15 @@ export class Engine {
 				}
 				const detach = this.listenEvents(step);
 				const nextDeferred = deferred();
+				const acting = presenterOf(step);
+				if (acting !== visible) {
+					visible.hide();
+					visible = acting;
+				}
 				const ctx: ActorCtx = {
 					signal: this.signal,
 					next: nextDeferred.promise,
-					presenter,
+					presenter: acting,
 					params: this.deps.params,
 					exit,
 					proceed: nextDeferred.resolve,
@@ -485,26 +507,25 @@ export class Engine {
 						progress?.save(i, false);
 						const el = await this.resolveTarget(step, params);
 						this.emit('step:resolved', { ...stepData, target: step.target ?? null });
-						presenter.show(step, el, showCtx);
+						acting.show(step, el, showCtx);
 						this.applyMasks(params);
-						await sleep(pace?.beforeAction ?? 0, this.signal);
-						if (el && presenter.moveCursor) await this.race(presenter.moveCursor(el));
+						await sleep(paceOf(step, 'beforeAction'), this.signal);
+						if (el && acting.moveCursor) await this.race(acting.moveCursor(el));
 						await this.race(actor.perform(step, el, action, ctx));
-						if (el && (action.kind === 'click' || action.kind === 'dblclick'))
-							presenter.ripple?.(el);
+						if (el && (action.kind === 'click' || action.kind === 'dblclick')) acting.ripple?.(el);
 						this.emit('step:acted', { ...stepData, action });
 						progress?.save(i, true);
 					} else {
 						acted = false;
 						const found =
 							step.target === undefined ? null : (resolveOne(step.target, params).el ?? null);
-						presenter.show(step, found, { ...showCtx, next: null });
+						acting.show(step, found, { ...showCtx, next: null });
 						this.applyMasks(params);
 						if (actor.resume) await this.race(actor.resume(step, ctx));
 					}
 					await this.waitExpectations(step, params);
-					await this.race(Promise.resolve(presenter.settle(step)));
-					await sleep(pace?.afterSettle ?? 0, this.signal);
+					await this.race(Promise.resolve(acting.settle(step)));
+					await sleep(paceOf(step, 'afterSettle'), this.signal);
 					result.completed += 1;
 					lastAction = step.do.kind;
 					navigated = false;
@@ -541,7 +562,7 @@ export class Engine {
 			}
 		} finally {
 			this.masker.clear();
-			presenter.hide();
+			visible.hide();
 			this.running = false;
 		}
 		return result;

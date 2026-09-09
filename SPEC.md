@@ -157,6 +157,8 @@ export interface Step {
 	optional?: boolean;                    // skip instead of fail when target is not found
 	timeout?: number;                      // ms, default 10000
 	qaOnly?: boolean;                      // stripped by compile({ public: true })
+	presenter?: 'doc' | 'spot' | 'guide' | 'none';          // overrides the run's presenter, scripted runs only
+	pace?: { beforeAction?: number; afterSettle?: number };  // ms, overrides config.pace for this step
 }
 
 export interface Journey {
@@ -357,15 +359,19 @@ Per step:
    actor has no timeout. `optional` steps skip on timeout. Ambiguity fails
    immediately with the count in the error.
 5. `presenter.show(step, el, ctx)` where ctx has index, total, resolved say
-   text, and a `next()` callback for `guide: 'next'` steps.
-6. Apply masks (section 5.3), wait `pace.beforeAction`, move the cursor to the
-   element if the presenter has one.
+   text, and a `next()` callback for `guide: 'next'` steps. A step with its own
+   `presenter` is drawn by that one instead, and the outgoing presenter is
+   hidden first. The human and stepped actors ignore `step.presenter` and
+   `step.pace`: the presenter is the only way through the run for a person, so
+   a step may not take it away or stall them.
+6. Apply masks (section 5.3), wait `step.pace.beforeAction ?? pace.beforeAction`,
+   move the cursor to the element if the presenter has one.
 7. `actor.perform(step, el)`; the engine draws the click ripple when the actor
    reports completion.
 8. Wait for all expectations, polling every 100 ms up to `timeout`. A failing
    expectation produces an error string naming the expectation and the
    observed state, for example `visible notes/dialog: 0 matches`.
-9. `presenter.settle(step)`, wait `pace.afterSettle`, emit `capture` (the
+9. `presenter.settle(step)`, wait `step.pace.afterSettle ?? pace.afterSettle`, emit `capture` (the
    driver yields it to the host), persist progress, continue.
 
 Events emitted via a small emitter and forwarded to `track`:

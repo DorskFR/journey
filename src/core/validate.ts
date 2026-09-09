@@ -28,6 +28,8 @@ const STEP_KEYS = new Set([
 	'optional',
 	'timeout',
 	'qaOnly',
+	'presenter',
+	'pace',
 ]);
 const LOCATOR_KEYS = new Set(['role', 'name', 'label', 'text', 'testid', 'css', 'within', 'nth']);
 const INTERACTION_KEYS: Record<string, Set<string>> = {
@@ -44,6 +46,8 @@ const INTERACTION_KEYS: Record<string, Set<string>> = {
 const TARGET_EXPECTATIONS = new Set(['visible', 'hidden', 'enabled', 'disabled']);
 const LEVELS = new Set(['smoke', 'checked', 'visual']);
 const GUIDES = new Set(['wait-for-user', 'next']);
+const PRESENTERS = new Set(['doc', 'spot', 'guide', 'none']);
+const PACE_KEYS = new Set(['beforeAction', 'afterSettle']);
 
 class Collector {
 	errors: ValidationError[] = [];
@@ -270,6 +274,19 @@ function checkCapture(c: Collector, path: string, v: unknown): void {
 	if ('crop' in v && v.crop !== 'none' && v.crop !== 'target') checkPath(c, `${path}.crop`, v.crop);
 }
 
+function checkPace(c: Collector, path: string, v: unknown): void {
+	if (!isRecord(v)) {
+		c.add(path, `expected { beforeAction?, afterSettle? }, got ${describe(v)}`);
+		return;
+	}
+	checkKeys(c, path, v, PACE_KEYS);
+	for (const key of PACE_KEYS) {
+		if (key in v && !(typeof v[key] === 'number' && (v[key] as number) >= 0)) {
+			c.add(`${path}.${key}`, 'expected a non-negative number');
+		}
+	}
+}
+
 function checkStep(c: Collector, path: string, v: unknown): void {
 	if (!isRecord(v)) {
 		c.add(path, `expected a step object, got ${describe(v)}`);
@@ -310,6 +327,10 @@ function checkStep(c: Collector, path: string, v: unknown): void {
 		c.add(`${path}.timeout`, 'expected a non-negative number');
 	}
 	if ('qaOnly' in v && typeof v.qaOnly !== 'boolean') c.add(`${path}.qaOnly`, 'expected a boolean');
+	if ('presenter' in v && !PRESENTERS.has(v.presenter as string)) {
+		c.add(`${path}.presenter`, `expected 'doc', 'spot', 'guide' or 'none'`);
+	}
+	if ('pace' in v) checkPace(c, `${path}.pace`, v.pace);
 	const kind = isRecord(v.do) ? v.do.kind : 'none';
 	if (kind !== 'none' && kind !== 'navigate' && !('target' in v)) {
 		c.add(`${path}.target`, `a target is required for do.kind "${String(kind)}"`);
