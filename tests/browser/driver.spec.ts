@@ -115,3 +115,39 @@ test('a step holds for its own pace', async ({ page }) => {
 	expect(result.ok).toBe(true);
 	expect(elapsed).toBeGreaterThanOrEqual(800);
 });
+
+const LATE_HOVER = `<!doctype html><html><body>
+<button data-journey="trigger" style="margin:80px">Trigger</button>
+<span data-journey="bubble" hidden>Tooltip</span>
+<script>
+setTimeout(() => {
+	const b = document.querySelector('[data-journey="bubble"]');
+	document.querySelector('[data-journey="trigger"]')
+		.addEventListener('pointerover', () => { b.hidden = false; });
+}, 4000);
+</script>
+</body></html>`;
+
+test('a hover that lands before the page listens is delivered again', async ({ page }) => {
+	await page.route('**/late-hover.html*', (route) =>
+		route.fulfill({ contentType: 'text/html', body: LATE_HOVER }),
+	);
+	const late: IR = {
+		id: 'late-hover',
+		version: 1,
+		route: '/late-hover.html',
+		level: 'smoke',
+		steps: [
+			{
+				id: 'tip',
+				target: 'trigger',
+				do: { kind: 'hover' },
+				guide: 'wait-for-user',
+				timeout: 9000,
+				expect: [{ visible: 'bubble' }],
+			},
+		],
+	};
+	const result = await runJourney(page, late, { baseUrl: BASE });
+	expect(result, JSON.stringify(result.failures)).toEqual({ ok: true, completed: 1, failures: [] });
+});
