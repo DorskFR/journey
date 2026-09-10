@@ -180,7 +180,11 @@ IR is `Journey` after validation and normalization: every default filled in,
 `capture` always an object, `do` always present, `guide` always present,
 `version` and `level` and `route` present, `steps[i].timeout` present. IR is
 plain JSON. `compile(journey, { public: true })` also removes steps with
-`qaOnly` and drops `probe` expectations whose name starts with `qa.`.
+`qaOnly` and drops `probe` expectations whose name starts with `qa.`. Only the
+in-app guide (`mount`) and `compile --public` do that; `book`, `check` and the
+Playwright harness compile with `public: false`. `publicDrops(journey)` returns
+what a public compile would drop and `dropLine(id, drops)` formats it, so a
+strip is always reported rather than silently shortening a run.
 
 `defineJourney(j)` returns `j` unchanged (typed with `const` inference).
 `defineConfig(c)` returns `c`. `msg(id)` returns `{ $msg: id }`. `param(p)`
@@ -648,8 +652,9 @@ or cross.
   `<dir>/<id>.journey.ts`, prints the paths, keeps the browser open until it
   is closed. Default dir: `journeys`.
 - `book [id...] [--presenter doc|spot|guide|none] [--video] [--variant dim=value]`: journeys
-  are compiled with `public: true` because the book is customer-facing; for
-  each journey and variant runs with the chosen presenter, captures every
+  are compiled with `public: false`: a `qaOnly` step is hidden from the app
+  guide but still runs and captures in the book, so the storyboard matches
+  what QA exercises; for each journey and variant runs with the chosen presenter, captures every
   capture step to `<out>/<id>/<variantKey>/<NN>-<name>.png`, records
   `tour.webm` when `--video` or any capture has `video`, converts to `mp4`
   and `gif` when ffmpeg exists (formats from config, default webm and mp4),
@@ -758,7 +763,10 @@ Unit (`tests/unit`):
   function values, unknown keys, bad target syntax, unknown expectation
   shape, missing `steps`; error paths are precise.
 - `compile.test.ts`: defaults filled; `public` strips `qaOnly` steps and `qa.`
-  probes; IR is JSON serializable.
+  probes; `publicDrops` and `dropLine` name what a strip removed; IR is JSON
+  serializable.
+- `load.test.ts`: the harness compile keeps a `qaOnly` step, the guide compile
+  drops it, and `dropReport` names the dropped ids.
 - `print.test.ts`: `print(compile(j))` is stable: compiling the printed
   source again (write to a temp file, dynamic import) yields deep-equal IR;
   `msg` and `param` round trip; output uses tabs and single quotes.

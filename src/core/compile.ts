@@ -31,6 +31,34 @@ function compileStep(step: Step, isPublic: boolean): IRStep {
 	return out;
 }
 
+export interface PublicDrops {
+	steps: string[];
+	probes: string[];
+}
+
+export function publicDrops(journey: Journey): PublicDrops {
+	const steps: string[] = [];
+	const probes: string[] = [];
+	for (const step of journey.steps) {
+		if (step.qaOnly === true) {
+			steps.push(step.id);
+			continue;
+		}
+		for (const e of step.expect ?? []) {
+			if (isQaProbe(e) && 'probe' in e) probes.push(`${step.id}.${e.probe}`);
+		}
+	}
+	return { steps, probes };
+}
+
+export function dropLine(id: string, drops: PublicDrops): string | undefined {
+	const parts: string[] = [];
+	if (drops.steps.length) parts.push(`steps ${drops.steps.join(', ')}`);
+	if (drops.probes.length) parts.push(`probes ${drops.probes.join(', ')}`);
+	if (!parts.length) return undefined;
+	return `journey ${id}: public compile dropped ${parts.join(' and ')}`;
+}
+
 export function compile(journey: Journey, options: CompileOptions = {}): IR {
 	assertValid(journey);
 	const isPublic = options.public === true;

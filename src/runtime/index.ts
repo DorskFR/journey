@@ -1,4 +1,4 @@
-import { compile } from '../core/compile.js';
+import { compile, dropLine, publicDrops } from '../core/compile.js';
 import type { IR, Journey, PresenterName, Text } from '../core/types.js';
 import { VERSION } from '../version.js';
 import { domActor, humanActor, steppedActor } from './actors.js';
@@ -272,6 +272,8 @@ export function mount(options: MountOptions = {}): JourneyApi {
 	function register(list: Journey[]): Promise<void> {
 		for (const journey of list) {
 			const ir = compile(journey, { public: true });
+			const dropped = dropLine(ir.id, publicDrops(journey));
+			if (dropped) console.info(dropped);
 			journeys.set(ir.id, ir);
 		}
 		return new Promise<void>((settled) => {

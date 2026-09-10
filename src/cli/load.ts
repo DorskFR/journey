@@ -1,19 +1,32 @@
 import { relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { compile } from '../core/compile.js';
+import { compile, dropLine, type PublicDrops, publicDrops } from '../core/compile.js';
 import type { CompileOptions, IR, Journey } from '../core/types.js';
 import { validate } from '../core/validate.js';
 import { importDefault, journeyFiles, type LoadedConfig } from './config.js';
+
+export const HARNESS_COMPILE: CompileOptions = { public: false };
+export const GUIDE_COMPILE: CompileOptions = { public: true };
 
 export interface LoadedJourney {
 	file: string;
 	journey: Journey;
 	ir: IR;
+	dropped: PublicDrops;
 }
 
 export interface LoadedJourneys {
 	journeys: LoadedJourney[];
 	errors: string[];
+}
+
+export function dropReport(journeys: LoadedJourney[]): string[] {
+	const lines: string[] = [];
+	for (const entry of journeys) {
+		const line = dropLine(entry.ir.id, entry.dropped);
+		if (line) lines.push(line);
+	}
+	return lines;
 }
 
 export async function loadJourneys(
@@ -36,7 +49,13 @@ export async function loadJourneys(
 			for (const e of result.errors) errors.push(`${label}: ${e.path}: ${e.message}`);
 			continue;
 		}
-		journeys.push({ file, journey: journey as Journey, ir: compile(journey as Journey, options) });
+		const source = journey as Journey;
+		journeys.push({
+			file,
+			journey: source,
+			ir: compile(source, options),
+			dropped: options.public === true ? publicDrops(source) : { steps: [], probes: [] },
+		});
 	}
 	return { journeys, errors };
 }

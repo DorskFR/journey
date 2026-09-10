@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { compile, defineJourney } from '../../src/index.js';
+import { compile, defineJourney, dropLine, publicDrops } from '../../src/index.js';
 
 const journey = defineJourney({
 	id: 'settings',
@@ -60,6 +60,19 @@ test('public strips qaOnly steps and qa. probes', () => {
 	expect(ir.steps[2]?.expect).toEqual([{ probe: 'theme', equals: 'dark' }]);
 	expect(compile(journey).steps).toHaveLength(4);
 	expect(compile(journey).steps[2]?.expect).toHaveLength(2);
+});
+
+test('a public strip names what it removed', () => {
+	expect(publicDrops(journey)).toEqual({ steps: ['escape'], probes: ['check.qa.internal'] });
+	expect(dropLine('settings', publicDrops(journey))).toBe(
+		'journey settings: public compile dropped steps escape and probes check.qa.internal',
+	);
+});
+
+test('a journey with nothing qa-only drops nothing and reports nothing', () => {
+	const plain = defineJourney({ id: 'plain', steps: [{ id: 'a' }] });
+	expect(publicDrops(plain)).toEqual({ steps: [], probes: [] });
+	expect(dropLine('plain', publicDrops(plain))).toBeUndefined();
 });
 
 test('IR is plain JSON', () => {
