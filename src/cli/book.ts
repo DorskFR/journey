@@ -16,7 +16,7 @@ import {
 	variantMatrix,
 	viewports,
 } from './config.js';
-import { type LoadedJourney, loadJourneys } from './load.js';
+import { HARNESS_COMPILE, type LoadedJourney, type LoadedJourneys, loadJourneys } from './load.js';
 import { type Argv, flagString, launchOptions, REPEAT_SEPARATOR } from './main.js';
 import { hasFfmpeg, storyboard, toGif, toMp4 } from './media.js';
 import {
@@ -176,9 +176,13 @@ async function bookVariant(
 	return { ok, error, manifest };
 }
 
+export function loadBookJourneys(loaded: LoadedConfig): Promise<LoadedJourneys> {
+	return loadJourneys(loaded, HARNESS_COMPILE);
+}
+
 export async function runBook(argv: Argv): Promise<number> {
 	const loaded = await loadConfig(flagString(argv, 'config'));
-	const { journeys, errors } = await loadJourneys(loaded, { public: true });
+	const { journeys, errors } = await loadBookJourneys(loaded);
 	if (errors.length) {
 		for (const line of errors) console.error(line);
 		return 1;

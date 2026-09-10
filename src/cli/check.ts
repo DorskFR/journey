@@ -3,7 +3,7 @@ import type { IR, Target } from '../core/types.js';
 import { failureMessage, runConfigured } from '../playwright/index.js';
 import { ensureApp } from './app.js';
 import { loadConfig, variantLabel, variantMatrix } from './config.js';
-import { loadJourneys } from './load.js';
+import { HARNESS_COMPILE, loadJourneys } from './load.js';
 import { type Argv, flagString, launchOptions } from './main.js';
 
 export type Health = 'stable' | 'fallback' | 'fragile';
@@ -23,7 +23,7 @@ export function healthCounts(ir: IR): Record<Health, number> {
 
 export async function runCheck(argv: Argv): Promise<number> {
 	const loaded = await loadConfig(flagString(argv, 'config'));
-	const { journeys, errors } = await loadJourneys(loaded);
+	const { journeys, errors } = await loadJourneys(loaded, HARNESS_COMPILE);
 	if (errors.length) {
 		for (const line of errors) console.error(line);
 		return 1;

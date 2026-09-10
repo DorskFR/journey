@@ -8,7 +8,13 @@ import {
 	variantMatrix,
 	viewports,
 } from '../cli/config.js';
-import { findJourney, type LoadedJourney, type LoadedJourneys, loadJourneys } from '../cli/load.js';
+import {
+	findJourney,
+	HARNESS_COMPILE,
+	type LoadedJourney,
+	type LoadedJourneys,
+	loadJourneys,
+} from '../cli/load.js';
 import { compile } from '../core/compile.js';
 import type { Capture, IR, Journey } from '../core/types.js';
 import type { RunResult } from '../runtime/engine.js';
@@ -41,7 +47,7 @@ export interface JourneyFixture {
 
 export async function loadAll(configPath?: string): Promise<Loaded> {
 	const config = await loadConfig(configPath);
-	const journeys = await loadJourneys(config);
+	const journeys = await loadJourneys(config, HARNESS_COMPILE);
 	if (journeys.errors.length) throw new Error(journeys.errors.join('\n'));
 	return { config, journeys };
 }
