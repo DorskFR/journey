@@ -102,6 +102,48 @@ export async function performAction(
 	}
 }
 
+const HOVER_RETRY = 500;
+
+function targetBox(page: Page, marker: string): Promise<Rect | null> {
+	return page.locator(`[data-journey-focus="${marker}"]`).boundingBox();
+}
+
+// pointerover only fires on the way in, so a page that starts listening after the
+// hover landed needs the mouse taken off the target and put back.
+async function settleHover(
+	page: Page,
+	box: Rect | null,
+	settling: Promise<SettleResult>,
+): Promise<SettleResult> {
+	if (!box) return settling;
+	const x = box.x + box.width / 2;
+	const y = box.y + box.height / 2;
+	const away = box.y >= 8 ? box.y - 8 : box.y + box.height + 8;
+	let settled = false;
+	const stop = (): boolean => {
+		settled = true;
+		return true;
+	};
+	const done = settling.then(stop, stop);
+	const again = (async (): Promise<void> => {
+		for (;;) {
+			await Promise.race([done, new Promise((r) => setTimeout(r, HOVER_RETRY))]);
+			if (settled) return;
+			try {
+				await page.mouse.move(x, away);
+				await page.mouse.move(x, y);
+			} catch {
+				return;
+			}
+		}
+	})();
+	try {
+		return await settling;
+	} finally {
+		await again;
+	}
+}
+
 function load(page: Page, ir: IR, opts: LoadOptions): Promise<{ resumedAt: number | null }> {
 	return page.evaluate(([j, o]) => (window.__journey as Api).driver.load(j, o), [
 		ir,
@@ -216,13 +258,15 @@ export async function runJourney(page: Page, ir: IR, opts: RunOptions): Promise<
 			continue;
 		}
 		const timeout = ir.steps[r.index]?.timeout ?? 10000;
+		let hovered: Rect | null = null;
 		if (r.action && r.marker) {
 			await performAction(page, r.marker, r.action, timeout, opts.baseUrl);
+			if (r.action.kind === 'hover') hovered = await targetBox(page, r.marker);
 		}
 		let settled: SettleResult;
 		try {
 			await acted(page);
-			settled = await settle(page);
+			settled = await settleHover(page, hovered, settle(page));
 		} catch {
 			await reload();
 			const resumed = await step(page);

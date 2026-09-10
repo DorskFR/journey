@@ -588,6 +588,16 @@ added (track with a WeakSet), sets the viewport for the variant, navigates to
 `page.goto()`. Returns `RunResult`. Per-action Playwright timeout equals the
 step timeout.
 
+A `hover` is the one action the page can miss for good: `pointerover` fires on
+the way in, and a mouse parked on the target never fires it again, so an app
+that binds its handler after the hover landed keeps the step polling against a
+tooltip that will never open. While a hover step is settling the driver leaves
+the target and re-enters it every 500 ms — never on the first settle, so a step
+that passes straight away is untouched — until the engine reports the step or
+its timeout runs out. Without this a run that is merely faster (`check` takes no
+screenshots and glides no cursor, so it is) disagrees with a slower one on the
+same journey.
+
 `fixtures.ts`: `applyFixture(name, config, ctx)` runs `command` and polls
 `ready` (default `app.url`) until 200 or `timeout`, returns a stop function;
 `routeFromHAR(har, { url: harUrl, notFound })` on the context; `storageState`
