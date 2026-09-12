@@ -48,6 +48,42 @@ test('identical Like buttons are ambiguous until nth picks one', async ({ page }
 	});
 });
 
+test('an index segment picks one of several unkeyed matches', async ({ page }) => {
+	await expect.poll(() => count(page, 'notes/note')).toBe(3);
+	expect(await one(page, 'notes/note')).toEqual({ error: 'ambiguous', count: 3 });
+	for (const path of ['notes/note[#0]', 'notes/note[#1]', 'notes/note[#2]']) {
+		expect(await count(page, path), path).toBe(1);
+	}
+	expect(await one(page, 'notes/note[#-1]')).toEqual(await one(page, 'notes/note[#2]'));
+	expect(await count(page, 'notes/note[#3]')).toBe(0);
+});
+
+test('an index segment addresses the same element as its key', async ({ page }) => {
+	await expect.poll(() => count(page, 'notes/note')).toBe(3);
+	const keys = await page.evaluate(() =>
+		Array.from(document.querySelectorAll('[data-journey="note"]'), (el) =>
+			el.getAttribute('data-journey-key'),
+		),
+	);
+	for (const [i, key] of keys.entries()) {
+		expect(await one(page, `notes/note[#${i}]/delete`), `#${i}`).toEqual(
+			await one(page, `notes/note[${key}]/delete`),
+		);
+	}
+});
+
+test('an index counts only visible matches', async ({ page }) => {
+	await expect.poll(() => count(page, 'notes/note')).toBe(3);
+	const first = await one(page, 'notes/note[#0]/delete');
+	const second = await one(page, 'notes/note[#1]/delete');
+	await page.evaluate(() => {
+		const el = document.querySelector('[data-journey="note"]') as HTMLElement;
+		el.style.display = 'none';
+	});
+	expect(await one(page, 'notes/note[#0]/delete')).not.toEqual(first);
+	expect(await one(page, 'notes/note[#0]/delete')).toEqual(second);
+});
+
 test('role and name, label, and text fallbacks', async ({ page }) => {
 	expect(await one(page, { role: 'button', name: 'Delete Plan the week' })).toEqual({
 		text: 'Delete',

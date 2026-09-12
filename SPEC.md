@@ -229,11 +229,15 @@ passed to the `translate` hook. Default variant when none declared:
 
 ## 4. Target paths
 
-Grammar: `segment ( '/' segment )*`, `segment = name ( '[' key ']' )?`,
+Grammar: `segment ( '/' segment )*`,
+`segment = name ( '[' key ']' )? ( '[' '#' index ']' )?`,
 `name = [A-Za-z0-9_.:-]+`, `key = [^\]]+` where a key of the form `{p}` is a
-param reference resolved from `step.params[p]`. Whitespace around `/` is
-ignored. `parseTarget(path)` returns `{ segments: [{ name, key?, param? }] }`
-or throws with a message that includes the offending path.
+param reference resolved from `step.params[p]`, and `index` is an integer.
+A key may not begin with `#`; that spelling is reserved for the index, so a
+malformed one such as `card[#a]` is an error rather than a literal key.
+Whitespace around `/` is ignored. `parseTarget(path)` returns
+`{ segments: [{ name, key?, param?, index? }] }` or throws with a message that
+includes the offending path.
 
 Resolution (`resolveAll(target, params, root = document)`):
 
@@ -243,6 +247,14 @@ Resolution (`resolveAll(target, params, root = document)`):
   segment search within each previously matched element. Elements matching
   a segment must not be nested inside another match of the same segment
   (take the outermost).
+- Index segment: after the name and any key narrow the matches, `[#i]` keeps
+  the single element at position `i` among the **visible** ones, in document
+  order and 0-based, counting from the end when `i` is negative. Out of range
+  yields no match rather than an error. This is the path equivalent of the
+  locator's `nth`, and because it is still a string path `journey check
+  --strict` accepts it. Use it to reach one of several interchangeable
+  elements — the first card in a list — without binding the journey to a key
+  that only one user's data contains.
 - Locator object: `testid` matches `[data-testid]`; `label` matches a form
   control whose associated `<label>` text or `aria-label` equals the string
   after trimming; `role` + `name` matches elements whose computed role equals
@@ -256,7 +268,11 @@ Resolution (`resolveAll(target, params, root = document)`):
   `hidden` passes when zero visible matches. `count` counts visible matches.
 
 `resolveOne` returns `{ el }` for exactly one match, `{ error: 'notfound' }`
-for zero, `{ error: 'ambiguous', count }` for more than one. Never guess.
+for zero, `{ error: 'ambiguous', count }` for more than one. Never guess. A
+path whose last segment carries no key, param or index is the one shape
+`check` calls stable that the runtime can still refuse, so when such a target
+is ambiguous the engine's message appends the indexed spelling that resolves
+it.
 
 Computed role: explicit `role` attribute, else implicit for `button`, `a[href]`
 (link), `input` by type (`checkbox`, `radio`, `textbox`, `button` for

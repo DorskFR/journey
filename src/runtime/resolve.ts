@@ -1,4 +1,4 @@
-import { parseTarget } from '../core/target.js';
+import { formatTarget, parseTarget } from '../core/target.js';
 import type { Locator, Target, TargetPath } from '../core/types.js';
 import type { Params } from './text.js';
 
@@ -46,6 +46,19 @@ const HIDDEN_INPUT_TYPES = new Set(['hidden']);
 
 export function describeTarget(target: Target): string {
 	return typeof target === 'string' ? target : JSON.stringify(target);
+}
+
+export function ambiguityHint(target: Target): string {
+	if (typeof target !== 'string') return '';
+	let last: ReturnType<typeof parseTarget>['segments'][number] | undefined;
+	try {
+		last = parseTarget(target).segments.at(-1);
+	} catch {
+		return '';
+	}
+	if (last === undefined) return '';
+	if (last.key !== undefined || last.param !== undefined || last.index !== undefined) return '';
+	return ` (add a key or an index, e.g. "${formatTarget({ segments: [{ ...last, index: 0 }] })}")`;
 }
 
 function collapse(text: string | null | undefined): string {
@@ -129,7 +142,7 @@ export function resolvePath(path: TargetPath, params: Params, root: ParentNode):
 			throw new Error(`Unresolved param "${segment.param}" in target "${path}"`);
 		}
 		const selector = attr('data-journey', segment.name);
-		scopes = unique(
+		let matched = unique(
 			scopes.flatMap((scope) => {
 				let els = Array.from(scope.querySelectorAll(selector));
 				if (key !== undefined) {
@@ -138,6 +151,12 @@ export function resolvePath(path: TargetPath, params: Params, root: ParentNode):
 				return outermost(els);
 			}),
 		);
+		if (segment.index !== undefined) {
+			const visible = matched.filter(isVisible);
+			const picked = visible.at(segment.index);
+			matched = picked === undefined ? [] : [picked];
+		}
+		scopes = matched;
 	}
 	return scopes as Element[];
 }

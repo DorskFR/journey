@@ -9,7 +9,7 @@ import type {
 	Target,
 } from '../core/types.js';
 import { Masker } from './mask.js';
-import { describeTarget, resolveAll, resolveOne } from './resolve.js';
+import { ambiguityHint, describeTarget, resolveAll, resolveOne } from './resolve.js';
 import {
 	currentLocale,
 	isParamRef,
@@ -413,7 +413,9 @@ export class Engine {
 			throw new Error(`target ${describeTarget(target)}: 0 matches after ${step.timeout}ms`);
 		}
 		if ('count' in found) {
-			throw new Error(`target ${describeTarget(target)}: ambiguous, ${found.count} matches`);
+			throw new Error(
+				`target ${describeTarget(target)}: ambiguous, ${found.count} matches${ambiguityHint(target)}`,
+			);
 		}
 		return found.el;
 	}
