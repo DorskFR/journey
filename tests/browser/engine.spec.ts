@@ -257,3 +257,29 @@ test('the mounted runtime strips qaOnly steps and qa. probes', async ({ page }) 
 	]);
 	expect(await page.evaluate(() => window.__journey?.engine()?.ir.steps[0]?.expect)).toEqual([]);
 });
+
+test('an ambiguous unkeyed target names the indexed spelling that fixes it', async ({ page }) => {
+	await register(page, [
+		ir({
+			id: 'ambiguous',
+			route: '/#notes',
+			steps: [
+				{ id: 'open', route: '/#notes', expect: [{ visible: 'notes' }] },
+				{ id: 'pick', target: 'notes/note', do: { kind: 'click' }, timeout: 300 },
+			],
+		}),
+	]);
+	await start(page, 'ambiguous', { mode: 'run' });
+	await expect
+		.poll(() => result(page))
+		.toEqual({
+			ok: false,
+			completed: 1,
+			failures: [
+				{
+					stepId: 'pick',
+					error: 'target notes/note: ambiguous, 3 matches (add a key or an index, e.g. "note[#0]")',
+				},
+			],
+		});
+});

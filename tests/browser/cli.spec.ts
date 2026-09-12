@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -269,4 +269,48 @@ test.describe('book and pages', () => {
 		expect(pages.code).toBe(0);
 		expect(pages.stdout).toContain('Usage: journey pages');
 	});
+});
+
+test('a positional path passes --strict where the same target as a locator does not', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'journey-strict-'));
+	const steps = (target: unknown) => [
+		{ id: 'start', route: '/', target: 'start', do: { kind: 'click' } },
+		{
+			id: 'pick',
+			target,
+			do: { kind: 'click' },
+			expect: [{ count: ['notes/note', { equals: 2 }] }],
+		},
+	];
+	const write = (name: string, target: unknown) => {
+		writeFileSync(
+			join(dir, `${name}.journey.js`),
+			`export default ${JSON.stringify({ id: name, route: '/', steps: steps(target) })};\n`,
+		);
+	};
+	write('positional', 'notes/note[#0]/delete');
+	write('locator', { within: 'notes/note[#0]', css: '[data-journey="delete"]' });
+	const configFor = (name: string) => {
+		const file = join(dir, `${name}.config.js`);
+		writeFileSync(
+			file,
+			`export default ${JSON.stringify({
+				app: { url: BASE },
+				journeys: `${name}.journey.js`,
+				variants: { viewport: { desktop: { width: 1280, height: 800 } } },
+			})};\n`,
+		);
+		return file;
+	};
+	try {
+		const strict = await journey(['check', '--config', configFor('positional'), '--strict']);
+		expect(strict.code, strict.stdout + strict.stderr).toBe(0);
+		expect(strict.stdout).toMatch(/^✓ positional .*fallback 0 fragile 0/m);
+
+		const loose = await journey(['check', '--config', configFor('locator'), '--strict']);
+		expect(loose.code).toBe(1);
+		expect(loose.stdout).toMatch(/^✗ locator .*fallback 0 fragile 1/m);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });

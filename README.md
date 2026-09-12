@@ -69,9 +69,16 @@ Targets are scoped `data-journey` paths. Repeated elements carry a key:
     <button data-journey="delete">Delete</button>
 ```
 
-`notes/note[42]/delete` is that button. Without attributes the recorder
-falls back to accessible role and name, labels, test ids and text, and
-`journey check --strict` tells you which targets still need one.
+`notes/note[42]/delete` is that button. When any one of the repeated
+elements will do, index instead of keying: `notes/note[#0]/delete` is the
+first visible note's button, `note[#-1]` the last. That keeps a journey
+user-agnostic — it clicks through to whatever the reader actually has,
+instead of naming an entity only your fixtures contain — and an indexed path
+is still a path, so `journey check --strict` accepts it.
+
+Without attributes the recorder falls back to accessible role and name,
+labels, test ids and text, and `journey check --strict` tells you which
+targets still need one.
 
 ## Config
 
