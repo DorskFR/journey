@@ -260,15 +260,16 @@ class OverlayImpl implements Overlay {
 			parts[name].style.visibility = anchored;
 		}
 		if (rect) {
+			const box = spotBox(rect, vw, vh, pad);
 			Object.assign(parts.spot.style, {
-				top: `${rect.top - pad}px`,
-				left: `${rect.left - pad}px`,
-				width: `${rect.width + pad * 2}px`,
-				height: `${rect.height + pad * 2}px`,
+				top: `${box.top}px`,
+				left: `${box.left}px`,
+				width: `${box.width}px`,
+				height: `${box.height}px`,
 			});
 			Object.assign(parts.badge.style, {
-				top: `${rect.top - pad - 13}px`,
-				left: `${rect.left - pad - 13}px`,
+				top: `${box.badgeTop}px`,
+				left: `${box.badgeLeft}px`,
 			});
 		}
 		if (this.mode === 'banner') {
@@ -295,6 +296,38 @@ class OverlayImpl implements Overlay {
 			el.style.left = `${clamp(rect.left, 12, Math.max(12, vw - w - 12))}px`;
 		}
 	}
+}
+
+export interface SpotBox {
+	top: number;
+	left: number;
+	width: number;
+	height: number;
+	badgeTop: number;
+	badgeLeft: number;
+}
+
+// A target larger than the viewport would put the ring edge and the badge
+// off-screen, so the ring is cut at the viewport and the badge rides its corner.
+export function spotBox(
+	rect: { top: number; left: number; width: number; height: number },
+	vw: number,
+	vh: number,
+	pad = 6,
+): SpotBox {
+	const edge = 3;
+	const top = Math.max(rect.top - pad, edge);
+	const left = Math.max(rect.left - pad, edge);
+	const bottom = Math.min(rect.top + rect.height + pad, vh - edge);
+	const right = Math.min(rect.left + rect.width + pad, vw - edge);
+	return {
+		top,
+		left,
+		width: Math.max(right - left, 0),
+		height: Math.max(bottom - top, 0),
+		badgeTop: clamp(top - 13, 0, Math.max(vh - 26, 0)),
+		badgeLeft: clamp(left - 13, 0, Math.max(vw - 26, 0)),
+	};
 }
 
 export function createOverlay(): Overlay {
