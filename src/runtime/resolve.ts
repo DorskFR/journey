@@ -42,6 +42,27 @@ const TAG_ROLES: Record<string, string> = {
 	details: 'group',
 };
 
+const NAME_FROM_CONTENT_ROLES = new Set([
+	'button',
+	'cell',
+	'checkbox',
+	'columnheader',
+	'gridcell',
+	'heading',
+	'link',
+	'menuitem',
+	'menuitemcheckbox',
+	'menuitemradio',
+	'option',
+	'radio',
+	'row',
+	'rowheader',
+	'switch',
+	'tab',
+	'tooltip',
+	'treeitem',
+]);
+
 const HIDDEN_INPUT_TYPES = new Set(['hidden']);
 
 export function describeTarget(target: Target): string {
@@ -90,7 +111,8 @@ function labelsOf(el: Element): string[] {
 
 /**
  * Pragmatic subset of the accessible name computation: aria-labelledby,
- * aria-label, associated label, alt, title, then text content. Not full accname.
+ * aria-label, associated label, alt, then text content for roles named from
+ * content, and title as the last fallback. Not full accname.
  */
 export function accessibleName(el: Element): string {
 	const labelledBy = el.getAttribute('aria-labelledby');
@@ -110,9 +132,12 @@ export function accessibleName(el: Element): string {
 		const alt = el.getAttribute('alt');
 		if (alt !== null && collapse(alt) !== '') return collapse(alt);
 	}
+	const role = computedRole(el);
+	const content = collapse(el.textContent);
+	if (role !== null && NAME_FROM_CONTENT_ROLES.has(role) && content !== '') return content;
 	const title = el.getAttribute('title');
 	if (title && collapse(title) !== '') return collapse(title);
-	return collapse(el.textContent);
+	return content;
 }
 
 export function isVisible(el: Element): boolean {
