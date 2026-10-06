@@ -97,6 +97,30 @@ test('role and name, label, and text fallbacks', async ({ page }) => {
 	expect(await one(page, { testid: 'version' })).toEqual({ text: 'demo 1.0', label: null });
 });
 
+function mount(page: import('@playwright/test').Page, html: string) {
+	return page.evaluate((markup) => {
+		const host = document.createElement('div');
+		host.innerHTML = markup;
+		document.body.append(host);
+	}, html);
+}
+
+test('a titled menuitem is named by its content, not its title', async ({ page }) => {
+	await mount(
+		page,
+		'<div role="menu"><div role="menuitem" title="Find in this conversation (Ctrl+F)">Search in conversation</div></div>',
+	);
+	expect(await count(page, { role: 'menuitem', name: 'Search in conversation' })).toBe(1);
+	expect(await count(page, { role: 'menuitem', name: 'Find in this conversation (Ctrl+F)' })).toBe(
+		0,
+	);
+});
+
+test('title still names a menuitem with no content', async ({ page }) => {
+	await mount(page, '<div role="menu"><div role="menuitem" title="Close menu"></div></div>');
+	expect(await count(page, { role: 'menuitem', name: 'Close menu' })).toBe(1);
+});
+
 test('hidden elements are not visible and count counts visible matches', async ({ page }) => {
 	expect(await count(page, 'secret')).toBe(0);
 	expect(await count(page, 'dialog')).toBe(0);
