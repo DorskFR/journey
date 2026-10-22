@@ -20,7 +20,7 @@
     "recorder"
   ],
   "engines": {
-    "node": ">=22.18"
+    "node": ">=26"
   },
   "files": [
     "dist"
