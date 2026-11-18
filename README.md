@@ -184,6 +184,16 @@ router; without it the button assigns `location.href`, which costs a document
 load but resumes from the saved progress. Nothing navigates until the user
 presses the button.
 
+While a step's target is not on the page, its card is drawn without a
+spotlight, with Exit. If the target does not appear within the step's
+`timeout` (10 s by default), an `optional` step is skipped and any other step
+ends the guide as failed, so it is not resumed on the next load. A target the
+page re-renders is found again.
+
+Escape exits the guide, unless the page handled it first (`preventDefault()`),
+focus is in an open dialog, popover, menu or listbox or on an expanded
+control, or the step itself asks the user to press Escape.
+
 `register` resolves once a resumed or autostarted run has been picked up, so
 `await` it before reading `window.__journey.engine()`.
 
@@ -243,12 +253,16 @@ mount({
 });
 ```
 
-`show`, `settle` and `hide` are required. `show` is called once per step with the
-resolved target element, or `null` when the step has none, and a context holding
+`show`, `settle` and `hide` are required. `show` is called for each step with the
+resolved target element, or `null` when the step has none; in guide and
+preview runs it is first called with `null` while the target is pending, and in
+guide runs again when the page replaces the target. Its context holds
 the localized `title` and `body`, the step's `index` and `total`, the `action` it
 performs, and `next` and `exit` callbacks. `next` is `null` when the step waits
 for the user to act on the page rather than press a button. `settle` runs after
-the step's expectations hold and may return a promise to delay the next step.
+the step's expectations hold and may return a promise to delay the next step;
+one still pending at the step's `timeout` fails the step, and so does a
+pending `moveCursor`.
 `hide` runs once when the run ends or is aborted.
 
 `message`, `moveCursor` and `ripple` are optional. `message` shows a card with

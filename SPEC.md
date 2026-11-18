@@ -399,9 +399,14 @@ Per step:
    navigation, and a resumed step that forced one already fails on the next
    miss instead of navigating again. After navigation the engine continues
    from the same step (progress is persisted before navigating).
-4. Resolve the target with polling every 100 ms up to `timeout`. The human
-   actor has no timeout. `optional` steps skip on timeout. Ambiguity fails
-   immediately with the count in the error.
+4. Resolve the target with polling every 100 ms up to `timeout`, for every
+   actor. The human and stepped actors first draw the step with no target
+   and no Next, so Exit and Escape work while it is pending. `optional` steps
+   skip on timeout; any other step fails the run, which clears progress so a
+   missing target is not resumed on the next load. Ambiguity fails
+   immediately with the count in the error. For the human actor, a target
+   that leaves the document while the engine waits for the user is resolved
+   again with a fresh timeout and the step is drawn on the new element.
 5. `presenter.show(step, el, ctx)` where ctx has index, total, resolved say
    text, and a `next()` callback for `guide: 'next'` steps. A step with its own
    `presenter` is drawn by that one instead, and the outgoing presenter is
@@ -411,14 +416,20 @@ Per step:
 6. Apply masks (section 5.3; they stay live until the run ends), wait `step.pace.beforeAction ?? pace.beforeAction`,
    move the cursor to the element if the presenter has one. `moveCursor`
    resolves on `transitionend`, on `transitioncancel`, or on a timer just past
-   the transition it asked for: a transition that never starts fires neither
-   event, and no caller has a timeout, so the run would hang on the step.
+   the transition it asked for, since a transition that never starts fires
+   neither event. A host `moveCursor` that has not resolved within the step
+   timeout fails the step.
 7. `actor.perform(step, el)`; the engine draws the click ripple when the actor
    reports completion.
 8. Wait for all expectations, polling every 100 ms up to `timeout`. A failing
    expectation produces an error string naming the expectation and the
-   observed state, for example `visible notes/dialog: 0 matches`.
-9. `presenter.settle(step)`, wait `step.pace.afterSettle ?? pace.afterSettle`, emit `capture` (the
+   observed state, for example `visible notes/dialog: 0 matches`. Each probe
+   call is raced against the time left: a probe that throws or has not
+   answered counts as not passing yet and is retried until the timeout, and
+   the error names the last outcome (`probe store: threw not ready`,
+   `probe store: no answer before the step timeout`).
+9. `presenter.settle(step)`, failing the step if it has not resolved within
+   the step timeout, wait `step.pace.afterSettle ?? pace.afterSettle`, emit `capture` (the
    driver yields it to the host), persist progress, continue.
 
 Events emitted via a small emitter and forwarded to `track`:
@@ -486,8 +497,13 @@ banners inject and smooth scrolls stay in flight without reporting any event,
 and a rect measured once leaves the box on the wrong element. The per-frame
 pass re-measures only, and lays out again only when the rect changed. The
 `spot` transition is 80 ms so a correction cannot slide across the page.
-Escape exits a guide run only for the human actor; driven and preview runs
-ignore it so a scripted Escape keystroke is not an exit. The spotlight scrolls
+Escape exits guide and preview runs; driven runs ignore it, and so does every
+run for an untrusted (scripted) keystroke. It is handled on `window` in the
+bubble phase, after the page, and is ignored when the page called
+`preventDefault()`, when focus is inside an open `dialog`, a `[popover]`, a
+`[role=menu]` or `[role=listbox]` or on an `aria-expanded="true"` control
+outside the overlay, and on a step whose action is pressing Escape (its Exit
+button then shows no `Esc` hint). The spotlight scrolls
 the target into view (`scrollIntoView({ block: 'center' })`) before measuring.
 
 Presenter factories take the `t(key, vars)` helper built from `strings`

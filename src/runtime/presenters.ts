@@ -45,6 +45,7 @@ function fillCard(
 		nextLabel?: string;
 		exit: () => void;
 		hints: boolean;
+		escapeIsStep?: boolean;
 	},
 ): void {
 	card.replaceChildren();
@@ -67,7 +68,9 @@ function fillCard(
 	counter.textContent = ctx.meta ?? '';
 	const buttons = document.createElement('div');
 	buttons.className = 'buttons';
-	buttons.append(button(t('exit'), ctx.hints ? 'Esc' : null, 'exit', ctx.exit));
+	buttons.append(
+		button(t('exit'), ctx.hints && !ctx.escapeIsStep ? 'Esc' : null, 'exit', ctx.exit),
+	);
 	let next: HTMLButtonElement | null = null;
 	if (ctx.next) {
 		next = button(ctx.nextLabel ?? t('next'), ctx.hints ? '\u21b5' : null, 'next', ctx.next);
@@ -148,34 +151,46 @@ function editable(target: EventTarget | null): boolean {
 	return target.matches('input,textarea,select');
 }
 
+const HOST_LAYER = 'dialog[open],[popover],[role="menu"],[role="listbox"]';
+
+function hostTakesEscape(target: EventTarget | null, overlay: Overlay): boolean {
+	if (!(target instanceof Element) || overlay.host.contains(target)) return false;
+	return target.matches('[aria-expanded="true"]') || target.closest(HOST_LAYER) !== null;
+}
+
 export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize): Presenter {
 	const cursor = cursorPresenter(overlay);
 	let onKey: ((event: KeyboardEvent) => void) | null = null;
+	let onEscape: ((event: KeyboardEvent) => void) | null = null;
 	const detachKey = (): void => {
 		if (onKey) window.removeEventListener('keydown', onKey, true);
+		if (onEscape) window.removeEventListener('keydown', onEscape);
 		onKey = null;
+		onEscape = null;
 	};
-	const attachKey = (exit: () => void, next: (() => void) | null): void => {
+	const attachKey = (exit: () => void, next: (() => void) | null, escapeIsStep = false): void => {
 		detachKey();
 		onKey = (event) => {
-			if (!event.isTrusted) return;
-			if (event.key === 'Escape') {
-				exit();
-				return;
-			}
-			if (!next || !NEXT_KEYS.includes(event.key)) return;
+			if (!event.isTrusted || !next || !NEXT_KEYS.includes(event.key)) return;
 			if (editable(event.target) && !overlay.host.contains(event.target as Node)) return;
 			event.preventDefault();
 			next();
 		};
+		onEscape = (event) => {
+			if (!event.isTrusted || event.key !== 'Escape' || escapeIsStep) return;
+			if (event.defaultPrevented || hostTakesEscape(event.target, overlay)) return;
+			exit();
+		};
 		window.addEventListener('keydown', onKey, true);
+		window.addEventListener('keydown', onEscape);
 	};
 	let human = true;
 	return {
 		show(_step, el, ctx) {
 			human = ctx.human;
 			const hints = ctx.human || ctx.stepped;
-			if (hints) attachKey(ctx.exit, ctx.next);
+			const escapeIsStep = ctx.action.kind === 'press' && ctx.action.key === 'Escape';
+			if (hints) attachKey(ctx.exit, ctx.next, escapeIsStep);
 			else detachKey();
 			const { spot, card } = overlay.parts;
 			spot.classList.remove('doc');
@@ -188,6 +203,7 @@ export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize):
 				next: ctx.next,
 				exit: ctx.exit,
 				hints,
+				escapeIsStep,
 			});
 			toast(overlay, t, ctx);
 			overlay.track(el);
