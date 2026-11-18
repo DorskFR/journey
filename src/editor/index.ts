@@ -102,7 +102,10 @@ interface Prepared {
 const SETTLE_MS = 300;
 let mounted: EditorApi | null = null;
 
-export function mountEditor(api: JourneyApi | undefined = window.__journey): EditorApi {
+export function mountEditor(api: JourneyApi | undefined = globalThis.window?.__journey): EditorApi {
+	if (typeof window === 'undefined' || typeof document === 'undefined') {
+		throw new Error('journey: mountEditor needs a browser; call it client-side');
+	}
 	if (mounted) return mounted;
 	if (!api) throw new Error('journey: mount the runtime before the editor');
 	useRuntime(api.resolve);
@@ -458,4 +461,4 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 	return editor;
 }
 
-window.journeyEditor = { mountEditor };
+if (typeof window !== 'undefined') window.journeyEditor = { mountEditor };

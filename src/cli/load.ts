@@ -1,9 +1,8 @@
 import { relative } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { compile, dropLine, type PublicDrops, publicDrops } from '../core/compile.js';
 import type { CompileOptions, IR, Journey } from '../core/types.js';
 import { validate } from '../core/validate.js';
-import { importDefault, journeyFiles, type LoadedConfig } from './config.js';
+import { importDefault, importUserFile, journeyFiles, type LoadedConfig } from './config.js';
 
 export const HARNESS_COMPILE: CompileOptions = { public: false };
 export const GUIDE_COMPILE: CompileOptions = { public: true };
@@ -39,7 +38,7 @@ export async function loadJourneys(
 		const label = relative(process.cwd(), file) || file;
 		let journey: unknown;
 		try {
-			journey = importDefault<unknown>(await import(pathToFileURL(file).href));
+			journey = importDefault<unknown>(await importUserFile(file));
 		} catch (error) {
 			errors.push(`${label}: import failed: ${error instanceof Error ? error.message : error}`);
 			continue;

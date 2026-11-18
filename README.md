@@ -7,6 +7,9 @@ or screenshots and video that keep your docs in sync.
 npm i -D @dorsk/journey @playwright/test
 ```
 
+`@playwright/test` is an optional peer: an app that only ships the guide or
+the editor installs `@dorsk/journey` alone (see [In the app](#in-the-app)).
+
 One declarative `.journey.ts` file per flow. One in-page engine that runs it
 four ways:
 
@@ -100,7 +103,15 @@ export default defineConfig({
 });
 ```
 
-Paths are relative to the config file. `journey record` also saves a HAR to
+Paths are relative to the config file. Every command loads the config and
+the journeys with Playwright's TypeScript loader, the same one `journey test`
+uses, so extensionless imports, enums, `tsconfig` paths and packages without
+`"type": "module"` work everywhere. Without `@playwright/test`, `compile`
+falls back to Node type stripping: relative imports need their `.ts`
+extension, and enums, namespaces, parameter properties and `tsconfig` paths
+are not supported.
+
+`journey record` also saves a HAR to
 `journeys/fixtures/<id>.har` so the journey replays offline (`--no-har` to
 skip). Auth and cookie headers and request bodies with a secret field are
 removed, but response bodies stay: review the HAR before committing it.
@@ -131,8 +142,10 @@ differ — treat those captures as a debugging aid, not as docs to commit.
 
 ## In the app
 
-Only needed for guide mode or the in-app editor. The runtime has no
-dependencies.
+Only needed for guide mode or the in-app editor. The runtime and the editor
+have no dependencies and do not need `@playwright/test`. Both import cleanly
+in Node (SSR, prerender, unit tests); `mount` and `mountEditor` must run in
+the browser.
 
 ```ts
 if (import.meta.env.PUBLIC_JOURNEY) {

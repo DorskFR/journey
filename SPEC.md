@@ -3,7 +3,7 @@
 This file is the contract for the implementation. Anything not stated here is
 a decision to make in the simplest way that satisfies the tests. Do not add
 dependencies. The browser bundles have zero dependencies. The Node side uses
-only `@playwright/test` (peer) and Node built-ins.
+only `@playwright/test` (optional peer) and Node built-ins.
 
 Style: TypeScript strict, tabs, single quotes, semicolons, Biome recommended.
 Imports between source files use `.js` extensions (Node ESM). No comments
@@ -103,7 +103,15 @@ the `require` export conditions. Playwright transpiles a user's `.ts` config,
 journeys and specs to CommonJS when their package has no `"type": "module"`,
 and a `require` of an ES module that is still being linked by the runner
 fails, so those two entry points must exist in both formats. Dynamic imports
-of user files unwrap the extra `default` that such transpiled modules carry. The editor
+of user files unwrap the extra `default` that such transpiled modules carry.
+The CLI loads user files through `requireOrImport` from `playwright/lib/common`
+(resolved next to `@playwright/test`), so it accepts exactly what
+`journey test` accepts; without the peer it falls back to `import()` under Node
+type stripping and appends the supported subset to the error.
+`@playwright/test` is optional (`peerDependenciesMeta`): `.`, `./runtime` and
+`./editor` never import it, `./playwright` throws an install hint in both
+formats (ESM via the generated `dist/playwright/entry.js`), and CLI commands
+that need a browser print the same hint. The editor
 bundle imports core (print) and runtime pieces it needs; it must work when
 loaded after `runtime.iife.js` on a page, or as an ESM import in an app.
 
@@ -551,6 +559,8 @@ the host passes to `load` again.
 panel inside the overlay `panel` slot: buttons Record/Stop, Preview, Run,
 Export, and the step list. It is also what `mount({ editor: true })` calls
 when the editor module is present (`window.journeyEditor` or import).
+Importing the module has no effect outside a browser; `mountEditor` there
+throws `journey: mountEditor needs a browser; call it client-side`.
 
 Observation (`observe.ts`): capturing listeners on `document` for `click`,
 `dblclick`, `input`, `change`, `keydown`, and navigation (`popstate`,
@@ -908,6 +918,13 @@ Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
   and assert the output files exist with the manifest structure; skip mp4
   and gif assertions when `hasFfmpeg()` is false. Run `journey test` too and
   assert exit 0.
+- `loaders.spec.ts`: in temp projects outside the repo, `compile` loads an
+  extensionless import, an enum and a `tsconfig` path in both a CommonJS and
+  an ESM package with no warning; with a copied package and no
+  `@playwright/test`, `.`, `./runtime` and `./editor` import and require in
+  Node, `mountEditor` names the browser requirement, `./playwright` and
+  `check` print the install hint, and a strip-only failure in `compile`
+  states the supported subset.
 
 All tests must pass with `npm test` locally and in CI on Ubuntu with
 Chromium only.
