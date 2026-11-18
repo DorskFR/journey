@@ -53,7 +53,8 @@ const COMMAND_HELP: Record<string, string> = {
   --headed        show the browser instead of running headless
   --slow-mo <ms>  pause that long before each browser operation
   every other argument (--grep, --shard, --workers, --reporter, files...) is
-  forwarded to playwright test in order; everything after -- is forwarded as is`,
+  forwarded to playwright test in order; everything after -- is forwarded as is
+  e.g. journey test --grep create-note --workers 2 -- --headed`,
 	record: `Usage: journey record [url] [-o dir] [--no-har] [--storage-state] [--viewport name] [--headless] [--config path]
 
   url              start url, default config app.url; a path is resolved against it

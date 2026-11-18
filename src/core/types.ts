@@ -75,7 +75,6 @@ export interface Step {
 	qaOnly?: boolean;
 	presenter?: PresenterName;
 	pace?: Pace;
-	test?: TestConfig;
 }
 
 export interface Journey {
