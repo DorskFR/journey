@@ -85,7 +85,9 @@ inside the shadow root of `<color-picker data-journey="color-picker">`, and
 `checkout/payment>>card-number` one inside `<iframe data-journey="payment">`.
 A locator scopes to the same place with `within: 'checkout/payment>>'`. `/`
 alone never crosses, so annotate the host or the iframe to reach inside it.
-Closed shadow roots and cross-origin frames can't be targeted.
+The guide overlay, the actors, `journey test` and the editor's picker all
+work on those targets, through nested frames too. Closed shadow roots and
+cross-origin frames can't be targeted.
 
 Without attributes the recorder falls back to accessible role and name,
 labels, test ids and text, and `journey check --strict` tells you which

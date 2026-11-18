@@ -272,6 +272,10 @@ Resolution (`resolveAll(target, params, root = document)`):
   crosses into a shadow root or a frame, so paths without `>>` resolve as if
   neither existed. Closed shadow roots and cross-origin frames yield no match.
   `within: 'a>>'` scopes a locator to that shadow root or frame document.
+  A target inside frames is drawn, captured and cropped at its position in
+  the top page (each frame's content-box offset added), and the DOM actor
+  dispatches events built in the target's own window, with coordinates in
+  that frame's viewport.
 - Index segment: after the name and any key narrow the matches, `[#i]` keeps
   the single element at position `i` among the **visible** ones, in document
   order and 0-based, counting from the end when `i` is negative. Out of range
@@ -665,7 +669,8 @@ fallback, red fragile), action summary, editable `say.title` and `say.body`,
 a Capture toggle, an expectation list with checkboxes for suggestions and a
 remove button for accepted ones, an "Add expectation" form, and a delete
 button. The form takes a kind, a target picked by clicking an element in the
-page (pick mode outlines the hovered element without scrolling, Escape
+page (pick mode outlines the hovered element without scrolling, picks the
+real element inside open shadow roots and same-origin frames, Escape
 cancels), and a value prefilled from the picked element or the current
 location. A failed row shows the engine's error text. A Values section lists
 every `var.*` parameter the draft references with password inputs; values
@@ -707,8 +712,9 @@ or an action (`action`, with `marker` = `data-journey-focus` value, null for
 `none`). After a `route` the host navigates and calls `load` again with the
 same arguments; the engine resumes from progress and `step` continues that
 same step. After an `action` the host performs it on
-`[data-journey-focus="<marker>"]` and calls `acted()`, then `settle()`, which
-waits for expectations and returns the capture spec. The host captures, then
+`[data-journey-focus="<marker>"]`, in whichever frame holds it, and calls
+`acted()`, then `settle()`, which waits for expectations and returns the
+capture spec. The host captures, then
 calls `step()` again. Every promise rejects with a readable message when the
 protocol is used out of order.
 

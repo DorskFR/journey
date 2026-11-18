@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import type { Capture, Interaction, IR } from '../core/types.js';
 import type { LoadOptions, SettleResult, StepResult } from '../runtime/driver.js';
 import type { Pace, RunResult } from '../runtime/engine.js';
@@ -71,6 +71,17 @@ export function errorLine(error: unknown): string {
 	return message.split('\n')[0]?.trim() ?? '';
 }
 
+// page.locator pierces shadow roots but not frames, so the frame holding the
+// marked target is found first.
+async function marked(page: Page, marker: string): Promise<Locator> {
+	const selector = focusSelector(marker);
+	for (const frame of page.frames()) {
+		const locator = frame.locator(selector);
+		if ((await locator.count().catch(() => 0)) > 0) return locator;
+	}
+	return page.locator(selector);
+}
+
 export async function performAction(
 	page: Page,
 	marker: string,
@@ -78,7 +89,7 @@ export async function performAction(
 	timeout: number,
 	baseUrl: string,
 ): Promise<void> {
-	const locator = page.locator(focusSelector(marker));
+	const locator = await marked(page, marker);
 	switch (action.kind) {
 		case 'click':
 			await locator.click({ timeout });
@@ -111,8 +122,8 @@ export async function performAction(
 
 const HOVER_RETRY = 500;
 
-function targetBox(page: Page, marker: string): Promise<Rect | null> {
-	return page.locator(focusSelector(marker)).boundingBox();
+async function targetBox(page: Page, marker: string): Promise<Rect | null> {
+	return (await marked(page, marker)).boundingBox();
 }
 
 // pointerover only fires on the way in, so a page that starts listening after the
@@ -184,6 +195,9 @@ export async function captureContext(
 		([s, t, p]) => {
 			const journey = window.__journey as Api;
 			const runtime = journey.resolve;
+			const measure = (
+				window as unknown as { journeyRuntime?: { viewportRect?: (el: Element) => DOMRect } }
+			).journeyRuntime?.viewportRect;
 			let rect: Rect | null = null;
 			if (t !== undefined) {
 				const el = journey.overlay.target();
@@ -192,7 +206,7 @@ export async function captureContext(
 				} else {
 					const found = runtime.resolveOne(t, { ...p, ...runtime.resolveStepParams(s.params, p) });
 					if ('el' in found && found.el) {
-						const r = found.el.getBoundingClientRect();
+						const r = measure ? measure(found.el) : found.el.getBoundingClientRect();
 						rect = { x: r.x, y: r.y, width: r.width, height: r.height };
 					}
 				}

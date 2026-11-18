@@ -1,5 +1,5 @@
 import type { Presenter, ShowCtx } from './engine.js';
-import type { Overlay } from './overlay.js';
+import { type Overlay, viewportRect } from './overlay.js';
 import { defaultLocalize, type Localize } from './strings.js';
 
 export const nonePresenter: Presenter = {
@@ -135,7 +135,7 @@ function cursorPresenter(overlay: Overlay): Pick<Presenter, 'moveCursor' | 'ripp
 	return {
 		moveCursor(el) {
 			const cursor = overlay.parts.cursor;
-			const rect = el.getBoundingClientRect();
+			const rect = viewportRect(el);
 			const x = rect.left + rect.width / 2;
 			const y = rect.top + rect.height / 2;
 			const first = cursor.hidden;
@@ -169,7 +169,7 @@ function cursorPresenter(overlay: Overlay): Pick<Presenter, 'moveCursor' | 'ripp
 		},
 		ripple(el) {
 			const ripple = overlay.parts.ripple;
-			const rect = el.getBoundingClientRect();
+			const rect = viewportRect(el);
 			ripple.style.left = `${rect.left + rect.width / 2}px`;
 			ripple.style.top = `${rect.top + rect.height / 2}px`;
 			ripple.hidden = false;
