@@ -79,9 +79,18 @@ user-agnostic — it clicks through to whatever the reader actually has,
 instead of naming an entity only your fixtures contain — and an indexed path
 is still a path, so `journey check --strict` accepts it.
 
+`>>` crosses into an open shadow root or a same-origin iframe:
+`settings/color-picker>>swatch[red]` is a `data-journey="swatch"` element
+inside the shadow root of `<color-picker data-journey="color-picker">`, and
+`checkout/payment>>card-number` one inside `<iframe data-journey="payment">`.
+A locator scopes to the same place with `within: 'checkout/payment>>'`. `/`
+alone never crosses, so annotate the host or the iframe to reach inside it.
+Closed shadow roots and cross-origin frames can't be targeted.
+
 Without attributes the recorder falls back to accessible role and name,
 labels, test ids and text, and `journey check --strict` tells you which
-targets still need one.
+targets still need one: it fails the journey and lists each of them under it,
+`  step save: fallback {"role":"button","name":"Save"}`.
 
 ## Config
 
@@ -111,13 +120,23 @@ falls back to Node type stripping: relative imports need their `.ts`
 extension, and enums, namespaces, parameter properties and `tsconfig` paths
 are not supported.
 
-`journey record` also saves a HAR to
-`journeys/fixtures/<id>.har` so the journey replays offline (`--no-har` to
-skip). Auth and cookie headers and request bodies with a secret field are
-removed, but response bodies stay: review the HAR before committing it.
+`journey record` reads the config when there is one: the url defaults to
+`app.url` (a bare path such as `/settings` is resolved against it), `app.start`
+is started when the app does not answer, the journey lands in the directory of
+the first `journeys` pattern, and the window takes the size of the first
+`variants.viewport` (`--viewport mobile` for another one). Without a config it
+needs a url and writes to `./journeys`.
+
+It also saves a HAR to `journeys/fixtures/<id>.har`, one per exported journey,
+holding the whole session, so the journey replays offline (`--no-har` to skip).
+Auth and cookie headers and request bodies with a secret field are removed, but
+response bodies stay: review the HAR before committing it. The raw HAR is kept
+in `.journey/` while recording and removed at the end, Ctrl-C included.
 `--storage-state` also saves cookies and local storage to
 `.journey/<id>.storage.json`, a self-gitignored directory outside the
-journeys; it holds live session tokens, so never commit it.
+journeys; it holds live session tokens, so never commit it. When it stops,
+`record` prints the `fixtures` entry to paste into the config and the
+`fixture: '<id>'` to add to the journey so it replays from those files.
 
 `check`, `book` and `pages` start `app.start` when `app.url` does not answer,
 and stop it on every exit, Ctrl-C included. When it never answers, the error
@@ -140,10 +159,23 @@ viewport=mobile`), and an unknown dim or value exits 1 with the valid ones.
 The journey's `manifest.json` and index keep the variants already booked on
 disk.
 
+Each booked variant gets `index.md` and `index.html`, a standalone UTF-8 page
+with only relative links, so it opens straight from disk. With a video, `book`
+also writes `tour.vtt`, a WebVTT caption track with each captured step's `say`
+title and body, shown from that capture until the next: the page plays the
+video with it, and a `spot` or `none` video keeps its text toggleable and
+translatable. The storyboard draws every capture at its own aspect ratio, so a
+`crop: 'target'` capture is letterboxed instead of stretched. Without ffmpeg,
+`book` keeps `tour.webm` and says it skipped `mp4` and `gif`.
+
 `pages` names each route's directory after its path, query and hash in
 lowercase letters, digits and `-`: `/` is `home`, `/users/1/edit` is
 `users-1-edit`, `/?tab=2` is `tab-2`. Two routes with one name (`/notes` and
-`/#notes`) fail: give one a `name`.
+`/#notes`) fail: give one a `name`. A page can name a `fixture` for its storage
+state and HAR (`{ route: '/account', fixture: 'signedIn' }`); without one, the
+config's `storageState` applies. `pages` blurs the config's `mask` targets,
+waits for the network to go idle (up to 5 s), and shoots with animations and
+transitions stopped and the caret hidden, so reruns give the same image.
 
 Journey ids, step ids, capture names and variant values become file names, so
 they must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (`create-note`, `step_2.a`).
@@ -247,6 +279,19 @@ page re-renders is found again.
 Escape exits the guide, unless the page handled it first (`preventDefault()`),
 focus is in an open dialog, popover, menu or listbox or on an expanded
 control, or the step itself asks the user to press Escape.
+
+Keyboard users are not dropped on `<body>`: a card with Next focuses it, a
+step waiting for the user focuses its target (or the card) when focus was
+lost, and leaving the guide puts focus back where it was before the tour.
+Focus is never taken from a field the user is typing in. The card's label and
+description follow the current step, and `prefers-reduced-motion` turns off
+the spotlight, cursor and ripple motion.
+
+Preview and run mode act on the page the way a user does: a click is the
+whole `pointerdown`…`click` sequence with coordinates, a fill is a native
+edit (React, Vue and contenteditable editors see it), Enter submits a form
+and Tab moves focus, and selecting an option that does not exist fails the
+step.
 
 `register` resolves once a resumed or autostarted run has been picked up, so
 `await` it before reading `window.__journey.engine()`.
@@ -430,7 +475,10 @@ own tooltip and clicking it still reaches the app even where the callout covers
 it. Only the guide card's buttons accept clicks.
 
 The overlay itself sits in the top layer, above everything the page can stack.
-Set `--journey-z` to take it out of the top layer and into the normal stacking
+While the app has a modal `<dialog>` open, the overlay moves inside it, because
+a modal dialog makes the rest of the page inert: the card's Exit and Next stay
+clickable and reachable with Tab. It moves back when the dialog closes or is
+removed. Set `--journey-z` to take it out of the top layer and into the normal stacking
 order at that z-index, so the app's own popovers can come out in front:
 
 ```css
@@ -483,6 +531,37 @@ A failed test keeps its trace and screenshot in `<out>/.test-results/`, and
 an html report is written to `<out>/.test-report/`. Under `CI` a failure is
 retried once. Flags such as `--workers`, `--retries`, `--trace` and
 `--reporter` override these defaults.
+
+`journey check` takes journey ids and `--variant dim=value` like `book`, and
+`--json` prints one report on stdout instead of a line per run:
+
+```json
+{
+  "ok": false,
+  "strict": true,
+  "errors": [],
+  "journeys": [
+    {
+      "id": "create-note",
+      "file": "journeys/create-note.journey.ts",
+      "ok": false,
+      "targets": { "stable": 3, "fallback": 1, "fragile": 0 },
+      "unstable": [{ "step": "save", "health": "fallback", "target": "{\"role\":\"button\",\"name\":\"Save\"}" }],
+      "runs": [
+        { "variant": { "viewport": "desktop" }, "ok": true, "failures": [] },
+        { "variant": { "viewport": "mobile" }, "ok": false, "failures": [{ "step": "save", "error": "..." }] }
+      ]
+    }
+  ]
+}
+```
+
+A journey's `ok` is false when a run failed or, under `--strict`, when it has
+an unstable target. `errors` holds journeys that do not load and bad arguments
+(an unknown id or variant); `failures[].step` is missing when the run broke
+outside a step. `check` exits 0 when `ok` is true, 1 otherwise. Every command
+exits 1 on an option it does not take (`--strcit`) and on a value option with
+no value (`--config` alone).
 
 ## Existing Playwright suite
 

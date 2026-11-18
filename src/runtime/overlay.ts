@@ -52,6 +52,7 @@ const CSS_TEXT = `
 .ripple{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border:3px solid var(--journey-accent,#ffd166);border-radius:50%;opacity:0}
 .ripple.on{animation:journey-ripple .5s ease-out}
 @keyframes journey-ripple{0%{transform:scale(1);opacity:1}100%{transform:scale(4);opacity:0}}
+@media (prefers-reduced-motion:reduce){.spot,.cursor{transition:none}.ripple.on{animation:none}}
 .toast{position:fixed;right:16px;bottom:16px;padding:8px 14px;border-radius:var(--journey-radius-sm,6px);background:var(--journey-inverse-surface,#111);color:var(--journey-inverse-text,#fff);font-weight:600}
 .toast kbd{padding:2px 6px;border:1px solid var(--journey-inverse-border,#888);border-radius:4px;background:var(--journey-inverse-surface-raised,#333);font:inherit}
 .panel{pointer-events:auto}
@@ -93,6 +94,8 @@ class OverlayImpl implements Overlay {
 		showPopover: ShowPopover;
 		togglePopover: TogglePopover;
 	} | null = null;
+	private modals: HTMLDialogElement[] = [];
+	private observer: MutationObserver | null = null;
 	private mode: Placement = 'anchored';
 	private frame = 0;
 	private measured = '';
@@ -148,11 +151,12 @@ class OverlayImpl implements Overlay {
 			parts[name] = el;
 		}
 		if (this.mode === 'banner') host.classList.add('banner');
-		document.documentElement.append(host);
 		this.hostEl = host;
 		this.rootEl = root;
 		this.partEls = parts;
+		this.modals = [...document.querySelectorAll('dialog')].filter((d) => d.matches(':modal'));
 		this.patch();
+		this.observe();
 		this.raise();
 		window.addEventListener('resize', this.onLayout);
 		window.addEventListener('scroll', this.onLayout, true);
@@ -170,6 +174,7 @@ class OverlayImpl implements Overlay {
 		const overlay = this;
 		HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
 			showModal.call(this);
+			overlay.modals = [...overlay.modals.filter((d) => d !== this), this];
 			overlay.raise();
 		};
 		HTMLElement.prototype.showPopover = function (this: HTMLElement, ...args: unknown[]) {
@@ -183,11 +188,33 @@ class OverlayImpl implements Overlay {
 		};
 	}
 
+	// A modal dialog makes everything outside it inert, the top layer included,
+	// so the overlay lives inside the topmost one for as long as it is modal.
+	private topModal(): HTMLDialogElement | null {
+		this.modals = this.modals.filter((d) => d.matches(':modal'));
+		return this.modals.at(-1) ?? null;
+	}
+
+	private observe(): void {
+		this.observer = new MutationObserver(() => {
+			const host = this.hostEl;
+			if (host && host.parentNode !== (this.topModal() ?? document.documentElement)) this.raise();
+		});
+		this.observer.observe(document.documentElement, {
+			childList: true,
+			subtree: true,
+			attributes: true,
+			attributeFilter: ['open'],
+		});
+	}
+
 	// The top layer ignores z-index, so a host that sets one wants normal stacking.
 	raise(): void {
 		const host = this.hostEl;
 		const originals = this.originals;
-		if (!host || !originals || !host.isConnected) return;
+		if (!host || !originals) return;
+		const parent = this.topModal() ?? document.documentElement;
+		if (host.parentNode !== parent) parent.append(host);
 		const z = getComputedStyle(host).getPropertyValue('--journey-z').trim();
 		try {
 			if (host.matches(':popover-open')) host.hidePopover();
@@ -203,6 +230,9 @@ class OverlayImpl implements Overlay {
 			HTMLElement.prototype.togglePopover = this.originals.togglePopover;
 			this.originals = null;
 		}
+		this.observer?.disconnect();
+		this.observer = null;
+		this.modals = [];
 		window.removeEventListener('resize', this.onLayout);
 		window.removeEventListener('scroll', this.onLayout, true);
 		cancelAnimationFrame(this.frame);

@@ -47,21 +47,24 @@ function fillCard(
 		hints: boolean;
 		escapeIsStep?: boolean;
 	},
-): void {
+): HTMLButtonElement | null {
 	card.replaceChildren();
 	card.setAttribute('role', 'dialog');
 	card.setAttribute('aria-live', 'polite');
+	card.tabIndex = -1;
 	if (ctx.title) {
 		const h = document.createElement('h2');
 		h.textContent = ctx.title;
 		card.append(h);
 		card.setAttribute('aria-label', ctx.title);
-	}
+	} else card.removeAttribute('aria-label');
 	if (ctx.body) {
 		const p = document.createElement('p');
+		p.id = 'journey-card-body';
 		p.textContent = ctx.body;
 		card.append(p);
-	}
+		card.setAttribute('aria-describedby', p.id);
+	} else card.removeAttribute('aria-describedby');
 	const meta = document.createElement('div');
 	meta.className = 'meta';
 	const counter = document.createElement('span');
@@ -78,7 +81,41 @@ function fillCard(
 	}
 	meta.append(counter, buttons);
 	card.append(meta);
-	next?.focus({ preventScroll: true });
+	return next;
+}
+
+function deepActive(): Element | null {
+	let el = document.activeElement;
+	while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+	return el;
+}
+
+function focusLost(overlay: Overlay): boolean {
+	const active = document.activeElement;
+	return !active || active === document.body || active === overlay.host;
+}
+
+function focusOn(el: Element | null): boolean {
+	if (!(el instanceof HTMLElement || el instanceof SVGElement)) return false;
+	el.focus({ preventScroll: true });
+	return deepActive() === el;
+}
+
+// Without a Next button, focus moves only when it was lost or sat in the
+// overlay, so a user typing in the page is never pulled away.
+function placeFocus(
+	overlay: Overlay,
+	el: Element | null,
+	next: HTMLButtonElement | null,
+	acts: boolean,
+): void {
+	if (next) {
+		focusOn(next);
+		return;
+	}
+	if (!focusLost(overlay)) return;
+	if (acts && el && focusOn(el)) return;
+	focusOn(overlay.parts.card);
 }
 
 function toast(overlay: Overlay, t: Localize, ctx: ShowCtx): void {
@@ -185,8 +222,13 @@ export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize):
 		window.addEventListener('keydown', onEscape);
 	};
 	let human = true;
+	let before: Element | null = null;
+	const remember = (): void => {
+		if (before === null) before = document.activeElement ?? document.body;
+	};
 	return {
 		show(_step, el, ctx) {
+			remember();
 			human = ctx.human;
 			const hints = ctx.human || ctx.stepped;
 			const escapeIsStep = ctx.action.kind === 'press' && ctx.action.key === 'Escape';
@@ -196,7 +238,7 @@ export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize):
 			spot.classList.remove('doc');
 			const cursorPart = ctx.human ? [] : ['cursor' as const];
 			hideAll(overlay, el ? ['spot', 'card', ...cursorPart] : ['card', ...cursorPart]);
-			fillCard(card, t, {
+			const next = fillCard(card, t, {
 				title: ctx.title,
 				body: ctx.body,
 				meta: t('step', { i: ctx.index + 1, n: ctx.total }),
@@ -208,6 +250,8 @@ export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize):
 			toast(overlay, t, ctx);
 			overlay.track(el);
 			overlay.raise();
+			const acts = ctx.human && ctx.action.kind !== 'none';
+			placeFocus(overlay, el, next, acts);
 		},
 		settle() {
 			overlay.parts.toast.hidden = true;
@@ -215,15 +259,27 @@ export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize):
 		},
 		hide() {
 			detachKey();
+			const restore = focusLost(overlay) ? before : null;
+			before = null;
 			hideAll(overlay);
 			overlay.track(null);
+			if (restore?.isConnected && restore !== document.body) focusOn(restore);
 		},
 		message(title, body, exit, next, nextLabel) {
+			remember();
 			attachKey(exit, next ?? null);
 			hideAll(overlay, ['card']);
-			fillCard(overlay.parts.card, t, { title, body, exit, next, nextLabel, hints: true });
+			const button = fillCard(overlay.parts.card, t, {
+				title,
+				body,
+				exit,
+				next,
+				nextLabel,
+				hints: true,
+			});
 			overlay.track(null);
 			overlay.raise();
+			placeFocus(overlay, null, button, false);
 		},
 		moveCursor(el) {
 			return human ? Promise.resolve() : (cursor.moveCursor as (el: Element) => Promise<void>)(el);

@@ -247,15 +247,17 @@ increasing precedence: `{ viewport: 'desktop' }`, the detected
 
 ## 4. Target paths
 
-Grammar: `segment ( '/' segment )*`,
+Grammar: `segment ( ( '/' | '>>' ) segment )* '>>'?`,
 `segment = name ( '[' key ']' )? ( '[' '#' index ']' )?`,
 `name = [A-Za-z0-9_.:-]+`, `key = [^\]]+` where a key of the form `{p}` is a
 param reference resolved from `step.params[p]`, and `index` is an integer.
 A key may not begin with `#`; that spelling is reserved for the index, so a
 malformed one such as `card[#a]` is an error rather than a literal key.
-Whitespace around `/` is ignored. `parseTarget(path)` returns
-`{ segments: [{ name, key?, param?, index? }] }` or throws with a message that
-includes the offending path.
+Whitespace around `/` and `>>` is ignored; `>>` inside a key is part of the
+key. `parseTarget(path)` returns
+`{ segments: [{ name, key?, param?, index?, into? }] }` or throws with a
+message that includes the offending path. `into` marks a segment followed by
+`>>`. A path ending in `>>` is only valid as a locator's `within`.
 
 Resolution (`resolveAll(target, params, root = document)`):
 
@@ -265,6 +267,11 @@ Resolution (`resolveAll(target, params, root = document)`):
   segment search within each previously matched element. Elements matching
   a segment must not be nested inside another match of the same segment
   (take the outermost).
+- `a>>b`: `b` is searched inside the open shadow root of each match of `a`,
+  or inside its document when `a` is a same-origin `<iframe>`. `/` never
+  crosses into a shadow root or a frame, so paths without `>>` resolve as if
+  neither existed. Closed shadow roots and cross-origin frames yield no match.
+  `within: 'a>>'` scopes a locator to that shadow root or frame document.
 - Index segment: after the name and any key narrow the matches, `[#i]` keeps
   the single element at position `i` among the **visible** ones, in document
   order and 0-based, counting from the end when `i` is negative. Out of range
@@ -479,14 +486,34 @@ Unresolved refs fail the step with a clear error.
   literal, the element value equals it. For `select` and `check` resolve on
   `change`. For `press` resolve on a matching `keydown`. For `hover` resolve
   on `pointerenter`. For `none` resolve when the presenter's Next is pressed.
-- `domActor`: `click` calls `el.click()`; `dblclick` dispatches `dblclick`;
-  `fill` focuses, sets the value through the native value setter of
-  `HTMLInputElement`/`HTMLTextAreaElement` prototypes, then dispatches
-  `input` and `change`; `select` sets `value` and dispatches `change`;
-  `check` sets `checked` and dispatches `input` and `change`; `press`
-  dispatches `keydown`, `keypress`, `keyup` with `key` and matching `code` on
-  `el`; `hover` dispatches `pointerover`, `pointerenter`, `mouseover`,
-  `mouseenter`; `navigate` assigns `location.href`.
+- `domActor` dispatches the sequence a real user produces, so component
+  libraries that listen past `click` (menus opening on `pointerdown`,
+  controlled inputs with value trackers) behave as in a guide. `hover`
+  dispatches `pointerover`, `pointerenter`, `mouseover`, `mouseenter`,
+  `pointermove`, `mousemove` at the element's centre. `click` hovers, then
+  dispatches `pointerdown`, `mousedown`, focuses the nearest focusable
+  ancestor (or blurs), `pointerup`, `mouseup`, `click`, all with coordinates;
+  a cancelled `pointerdown` suppresses `mousedown`/`mouseup`, a cancelled
+  `mousedown` keeps focus where it is, and a disabled control gets nothing.
+  It works on SVG targets. `dblclick` runs the press twice (`detail` 1, 2)
+  then dispatches `dblclick`. `fill` focuses, selects the content and edits
+  it with `document.execCommand('insertText')` (`delete` for an empty value)
+  so the browser performs a native edit; for non-text inputs, or when the
+  command does nothing, it sets the value through the prototype's native
+  setter between `beforeinput` and `input` `InputEvent`s (`insertText`).
+  Inputs and textareas then get `change`; `contenteditable` targets are
+  supported. `select` matches an option by value, then by label, sets it
+  through the native setter and dispatches `input` and `change`, and fails
+  the step when no option matches. `check` clicks the box when its state
+  differs, and fails the step when the click did not change it (unchecking a
+  radio sets it directly). `press` takes `Key` or `Mod+Key` (`Shift`,
+  `Control`, `Alt`, `Meta`), focuses the target unless focus is already in
+  it, and dispatches `keydown`, `keypress` (printable keys and Enter only)
+  and `keyup` on the focused element; when not cancelled, Tab and Shift+Tab
+  move focus, Enter activates a button or link or implicitly submits the
+  field's form (`requestSubmit`, not when its submit button is disabled),
+  Space activates buttons and checkboxes, and a printable key is typed into
+  a focused text field. `navigate` assigns `location.href`.
 - `driverActor`: sets `data-journey-focus="<stepId>"` on the element, yields
   `{ action }` to the host through the driver protocol, resolves when the
   host calls `driver.acted()`, then removes the attribute.
@@ -502,7 +529,13 @@ overflow:visible; pointer-events:none`. Interactive children opt in with
 `HTMLElement.prototype.showPopover` and `togglePopover` so that after each
 call `overlay.raise()` runs (`hidePopover(); showPopover()`), keeping the
 overlay above modal dialogs and popovers. A comment on the patch explains the
-top-layer constraint. `overlay.remove()` restores the prototypes.
+top-layer constraint. A modal dialog makes the rest of the document inert,
+the top layer included, so while one is open the overlay host is moved into
+the topmost modal dialog, where the card's buttons stay clickable and
+focusable. A MutationObserver on `open` attributes and child lists moves it
+back to `<html>` (or into the next modal) as soon as that dialog closes or
+is removed. `overlay.remove()` restores the prototypes and disconnects the
+observer.
 
 Overlay parts, all inside the shadow root: `spot` (spotlight, absolute box
 with `box-shadow: 0 0 0 3px <accent>, 0 0 0 9999px rgba(0,0,0,.55)` for
@@ -517,6 +550,8 @@ banners inject and smooth scrolls stay in flight without reporting any event,
 and a rect measured once leaves the box on the wrong element. The per-frame
 pass re-measures only, and lays out again only when the rect changed. The
 `spot` transition is 80 ms so a correction cannot slide across the page.
+Under `prefers-reduced-motion: reduce` the spot and cursor have no
+transition and the ripple no animation.
 Escape exits guide and preview runs; driven runs ignore it, and so does every
 run for an untrusted (scripted) keystroke. It is handled on `window` in the
 bubble phase, after the page, and is ignored when the page called
@@ -533,7 +568,14 @@ button reads the `next` string followed by `<kbd>↵</kbd>` and Exit reads the
 `exit` string followed by `<kbd>Esc</kbd>`; other runs show no hints. When a
 card with a Next button is shown, that button receives focus
 (`preventScroll`) so Enter and Space work even when the previous step left
-focus in an input; wait-for-user steps do not move focus. Keys typed into an
+focus in an input. A card without Next moves focus only when it was lost
+(on `body`) or inside the overlay, so a user typing in the page is never
+pulled away: a step the user acts on focuses its target, and otherwise (or
+when the target cannot take focus) the card itself (`tabindex=-1`). When the
+guide ends, focus returns to the element that had it before the tour if
+focus is lost or in the overlay. The card is `role=dialog` `aria-live=polite`,
+its `aria-label` is the step title (removed when the step has none) and
+`aria-describedby` points at the body. Keys typed into an
 editable element outside the overlay are ignored.
 
 Colors: accent `#ffd166`, text `#111`, card background `#fff`, dim
@@ -591,11 +633,16 @@ element that is a button, link, input, select, textarea, `[role]`,
 ancestors carry `data-journey`, build the path from the chain of
 `data-journey` ancestors (outermost first) using `data-journey-key` values
 where present, and verify with `resolveOne` that it is unique; health
-`stable`. Otherwise try in order `testid`, `label`, `role`+`name`, `text`,
-each verified unique with `resolveOne` (optionally scoped with `within` to
-the nearest `data-journey` ancestor); health `fallback`. Otherwise a `css`
-path of tag and `:nth-of-type` from the nearest id or `data-journey`
-ancestor; health `fragile`.
+`stable`. The chain climbs out of a shadow root to its host and out of a
+same-origin frame to its `<iframe>`, joining those two with `>>`, as long as
+that host or iframe carries `data-journey`. Otherwise try in order `testid`,
+`label`, `role`+`name`, `text`, each verified unique with `resolveOne`
+(optionally scoped with `within` to the nearest `data-journey` ancestor, or
+`host>>` for an element directly inside an annotated host's shadow root or
+frame); health `fallback`. Otherwise a `css` path of tag and `:nth-of-type`
+from the nearest id or `data-journey` ancestor, scoped the same way; health
+`fragile`. The recorder reads the event's real target through shadow roots
+(`composedPath`) and listens inside same-origin frames too.
 
 Sensitive values: `input[type=password]`, `autocomplete` containing
 `one-time-code` or `cc-`, or `name`/`id`/`autocomplete` matching
@@ -736,10 +783,17 @@ or cross.
 - `compile [--public] [-o file]`: validates every journey, writes JSON array
   of IR to `-o` or prints; non-zero on validation errors listing
   `file: path: message`.
-- `check`: starts the app when `app.start` is set, runs every journey and
-  variant with presenter `none` at smoke level, prints a table with pass
-  or fail and the number of fallback and fragile targets, exit 1 on failure.
-  `--strict` also fails when any target is not `stable`. A failed action
+- `check [id...] [--strict] [--json] [--variant dim=value]`: starts the app
+  when `app.start` is set, runs the selected journeys and variants (default
+  all; ids and `--variant` as for `book`, an unknown one exits 1 naming the
+  valid ones) with presenter `none` at smoke level, prints a line per run
+  with pass or fail and the number of fallback and fragile targets, exit 1 on
+  failure. `--strict` also fails a journey when any target is not `stable`,
+  adds `strict: N unstable targets` to its lines and lists each one once under
+  them as `  step <id>: <fallback|fragile> <target>`. `--json` prints only
+  `{ ok, strict, errors, journeys: [{ id, file, ok, targets, unstable,
+  runs: [{ variant, ok, failures: [{ step?, error }] }] }] }` on stdout
+  (README "In CI"); load and argument errors go to `errors`. A failed action
   (click intercepted, element detached, action timeout) is that step's
   failure, `<kind> failed: <first line of the error>`, like an expectation.
 - `check`, `book` and `pages` stop the app and fixture commands they started
@@ -748,24 +802,37 @@ or cross.
   or never answers, the error ends with its exit code and last 40 lines.
 - Config `vars` are merged with the JSON object in the `JOURNEY_VARS`
   environment variable when set, so secrets never have to be written down.
+  Invalid JSON fails naming `JOURNEY_VARS`.
+- Every command rejects an option it does not take, and a value option
+  (`--config`, `-o`, `--variant`, ...) with no value, exit 1.
 - `test [playwright args...]`: spawns `npx playwright test -c <dist>/playwright/journeys.config.js`
   with `JOURNEY_CONFIG` set to the absolute config path and passes back the
   exit code. After `test`, journey consumes only `--config`, `--headed`,
   `--slow-mo` and `--help`; every other argument (`--grep`, `-g`, `--shard`,
   `--workers`, files...) is forwarded verbatim and in order, and everything
   after `--` is forwarded untouched.
-- `record <url> [-o dir] [--har] [--no-har] [--storage-state]`: launches
-  headed Chromium with the runtime and editor injected and `editor: true`.
-  The export binding takes only `{ ir }` from the page's main frame; the CLI
-  validates and compiles it and writes `<dir>/<id>.journey.ts` printed in
-  Node, ignoring any source or path the page sends. It records HAR to
-  `<dir>/fixtures/<id>.har` (default on), stripped of `authorization`,
-  `proxy-authorization`, `cookie` and `set-cookie` headers and of request
-  bodies holding a masked or secret-named field. `--storage-state` (off by
-  default) writes the storage state to `.journey/<id>.storage.json` under the
-  working directory, a directory that gitignores itself. Prints a warning
-  naming the secret-bearing files, prints the paths, keeps the browser open
-  until it is closed. Default dir: `journeys`.
+- `record [url] [-o dir] [--har] [--no-har] [--storage-state] [--viewport name]`:
+  loads the config when `--config` is given or the default one exists; the
+  url defaults to `app.url` and a leading-`/` url is resolved against it,
+  `app.start` is started when the app does not answer and stopped at the end,
+  the default dir is the fixed prefix of the first `journeys` pattern (else
+  `journeys`), and the window takes the first `variants.viewport` size or
+  `--viewport`'s. Launches headed Chromium with the runtime and editor
+  injected and `editor: true`, in every page of the context (tabs and
+  popups included). The export binding takes only `{ ir }` from a page's main
+  frame; the CLI validates and compiles it and writes `<dir>/<id>.journey.ts`
+  printed in Node, ignoring any source or path the page sends. It records the
+  session's HAR (default on) to `.journey/recording.har` and, when recording
+  stops (all pages closed, Ctrl-C, or the first export under `--headless`),
+  writes it to `<dir>/fixtures/<id>.har` for every exported id, stripped of
+  `authorization`, `proxy-authorization`, `cookie` and `set-cookie` headers
+  and of request bodies holding a masked or secret-named field, then removes
+  the raw file. `--storage-state` (off by default) writes the storage state to
+  `.journey/<id>.storage.json` next to the config (else the working
+  directory), a directory that gitignores itself. Prints a warning naming the
+  secret-bearing files, the paths it writes, and at the end the `fixtures`
+  config entry and `fixture` field that replay the journey from them; exits 1
+  when nothing was exported.
 - `book [id...] [--presenter doc|spot|guide|none] [--video] [--variant dim=value]`: journeys
   are compiled with `public: false`: a `qaOnly` step is hidden from the app
   guide but still runs and captures in the book, so the storyboard matches
@@ -774,33 +841,49 @@ or cross.
   `visual` baselines under `<out>/<id>/`), records
   `tour.webm` when `--video` or any capture has `video`, converts to `mp4`
   and `gif` when ffmpeg exists (formats from config, default webm and mp4),
-  writes `storyboard.png`, `manifest.json`, `index.md`, `index.html`.
+  writes `storyboard.png`, `manifest.json`, `index.md`, `index.html`, and with
+  a video `tour.vtt`: one cue per capture with a `say` title or body, from the
+  capture's time since the video started to the next capture (the last to the
+  end of the video). When a configured `mp4` or `gif` needs ffmpeg and it is
+  missing, one warning on stderr. A screenshot that fails with the transient
+  `Unable to capture screenshot` protocol error is retried twice, 100 ms
+  apart, before the step fails.
   `--variant` repeats of one dim are OR, dims are AND; an unknown dim or value,
   or a filter no selected journey matches, exits 1 listing the valid ones. The
   journey-level `<out>/book/<id>/manifest.json` and index merge this run's
   variants with the ones already booked on disk, in matrix order.
   `variantKey` is the dims joined with `-` in config order, for example
   `desktop-light`.
-- `pages`: for each `config.pages` route and variant, navigates and captures
-  the viewport to `<out>/pages/<name>/<variantKey>.png`, writes
+- `pages`: for each `config.pages` route and variant, applies the page's
+  `fixture` (storage state, HAR, command, setup) or the config `storageState`,
+  navigates, applies the variant, waits for `networkidle` (at most 5 s), blurs
+  the config `mask` targets and captures the viewport with animations disabled
+  and the caret hidden to `<out>/pages/<name>/<variantKey>.png`, writes
   `<out>/pages/index.md` with a table per page. The default `name` is the
   route's path (without its extension), query and hash, lowercased, with every
   run of other characters turned into `-`, `home` when empty. A `name` must
   match `^[A-Za-z0-9][A-Za-z0-9._-]*$`; two pages with one name (case-folded)
-  fail before anything runs.
+  fail before anything runs, as does a `fixture` the config does not define.
 
 `media.ts`: `hasFfmpeg()`; `toMp4(webm, mp4)` with
 `-c:v libx264 -pix_fmt yuv420p -movflags +faststart -crf 23`; `toGif(webm, gif)`
 with `fps=12,scale=800:-1:flags=lanczos` and palettegen/paletteuse;
-`storyboard(pngPaths, out, page)` draws the images into a canvas in a blank
-Playwright page, three per row, 400 px wide cells with a 1-based number badge,
-and screenshots it. No ffmpeg for the storyboard.
+`storyboard(pngPaths, out, browser)` draws the images into a canvas in a blank
+Playwright page, three per row, 400 px wide cells as tall as the largest image's
+aspect ratio, each image scaled to fit its cell and centred on grey, with a
+1-based number badge, and screenshots it. No ffmpeg for the storyboard.
+`renderVtt(marks, end)` writes the caption track.
 
 `report.ts`: `manifest` is
-`{ id, title, version, variants: Record<variantKey, { captures: Array<{ index, name, file, title, body }>, video?: Record<format, file>, storyboard: string }> }`.
+`{ id, title, version, variants: Record<variantKey, { captures: Array<{ index, name, file, title, body }>, video?: Record<format, file>, captions?: string, storyboard: string }> }`.
 `index.md` has the journey title, then per variant a heading and one figure
 per capture: image, then the resolved `say.title` in bold and `say.body`.
-`index.html` is the same as a fragment with `<figure>`/`<figcaption>`.
+`index.md` and `index.html` end each variant with its video links, captions
+and storyboard. `index.html` is a standalone page (`<!doctype html>`,
+`<meta charset="utf-8">`, `lang` when every variant has one locale) with the
+same content in `<figure>`/`<figcaption>`, and a `<video>` with the `mp4` and
+`webm` sources and a default captions `<track>`; `renderHtmlFragment` returns
+the body alone.
 Text is resolved with the config-free fallback rules of section 5 plus the
 in-page `translate` when the app registered one (ask the page).
 

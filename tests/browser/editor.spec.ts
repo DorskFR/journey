@@ -1,7 +1,8 @@
+import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 import type { ExportDetail } from '../../src/editor/export.js';
 import type { Draft } from '../../src/editor/index.js';
-import type { IR } from '../../src/index.js';
+import type { IR, Journey } from '../../src/index.js';
 import type { LoadOptions } from '../../src/runtime/index.js';
 import {
 	BASE,
@@ -423,4 +424,44 @@ test('Preview steps through with Next', async ({ page }) => {
 	await expect(card).toContainText('Step 2 of 2');
 	await expect(row(page, 0)).toHaveAttribute('data-result', 'pass');
 	await expect(panel(page, 'toggle')).toContainText('running 1/2');
+});
+
+test('stopping a recorder started before the runtime keeps the runtime following navigation', async ({
+	context,
+	page,
+}) => {
+	const dist = fileURLToPath(new URL('../../dist/', import.meta.url));
+	await context.addInitScript(() => {
+		Object.defineProperty(window, 'navigation', { value: undefined, configurable: true });
+	});
+	await context.addInitScript(RUNTIME_INIT);
+	await page.route(`${BASE}/__history.html`, (route) =>
+		route.fulfill({ contentType: 'text/html', body: '<!doctype html><body></body>' }),
+	);
+	await page.route(`${BASE}/dist/**`, (route) =>
+		route.fulfill({ path: dist + new URL(route.request().url()).pathname.slice('/dist/'.length) }),
+	);
+	await page.goto(`${BASE}/__history.html`);
+	const tour: Journey = {
+		id: 'tour',
+		version: 1,
+		route: '/dashboard',
+		autostart: { route: '/dashboard' },
+		steps: [{ id: 'hello', say: { title: 'Hello', body: 'Welcome.' } }],
+	};
+	await page.evaluate(async (journey) => {
+		const { createObserver } = (await import(
+			'/dist/editor/observe.js' as string
+		)) as typeof import('../../src/editor/observe.js');
+		const observer = createObserver({ ignore: () => false, prepare: () => null, emit() {} });
+		observer.start();
+		(
+			window as unknown as { journeyRuntime: typeof import('../../src/runtime/index.js') }
+		).journeyRuntime.mount({});
+		await window.__journey?.register([journey]);
+		observer.stop();
+		history.pushState({}, '', '/dashboard');
+	}, tour);
+	await expect(page.locator('journey-overlay .card')).toContainText('Hello');
+	await page.evaluate(() => localStorage.clear());
 });

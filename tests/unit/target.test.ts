@@ -54,6 +54,10 @@ test('round trips through format', () => {
 		'card[#-1]',
 		'note[a b][#0]',
 		'note[{id}][#2]',
+		'app/card>>ok',
+		'card[3]>>pay/submit[#0]',
+		'card>>',
+		'a>>b>>c',
 	]) {
 		expect(formatTarget(parseTarget(path))).toBe(path);
 	}
@@ -75,7 +79,25 @@ test('throws with the offending path', () => {
 		'card[#0][#1]',
 		'card[#0][a]',
 		'card[a][b]',
+		'>>ok',
+		'card>>>>ok',
+		'card>>/ok',
+		'card>',
+		'card>ok',
 	]) {
 		expect(() => parseTarget(bad), bad).toThrow(JSON.stringify(bad));
 	}
+});
+
+test('>> marks the segment whose shadow root or frame the next one is in', () => {
+	expect(parseTarget('app/card >> ok')).toEqual({
+		segments: [{ name: 'app' }, { name: 'card', into: true }, { name: 'ok' }],
+	});
+	expect(parseTarget('frame[a]>>')).toEqual({
+		segments: [{ name: 'frame', key: 'a', into: true }],
+	});
+});
+
+test('>> inside a key is part of the key', () => {
+	expect(parseTarget('note[a>>b]')).toEqual({ segments: [{ name: 'note', key: 'a>>b' }] });
 });

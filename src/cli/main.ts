@@ -2,6 +2,9 @@
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { VERSION } from '../version.js';
+import { REPEAT_SEPARATOR } from './config.js';
+
+export { REPEAT_SEPARATOR };
 
 export interface Argv {
 	command: string | undefined;
@@ -14,9 +17,10 @@ export const USAGE = `Usage: journey <command> [options] [--config path]
 
 Commands:
   compile [--public] [-o file]                       validate and print IR as JSON
-  check [--strict]                                   run every journey and variant
+  check [id...] [--strict] [--json] [--variant dim=value]
+                                                     run every journey and variant
   test [playwright args...]                          run journeys through Playwright test
-  record <url> [-o dir] [--no-har] [--storage-state] [--headless]
+  record [url] [-o dir] [--no-har] [--storage-state] [--viewport name] [--headless]
                                                      record a journey in a browser
   book [id...] [--presenter p] [--placement p] [--video] [--variant dim=value]
                                                      capture screenshots, video and a report per journey and variant
@@ -34,20 +38,27 @@ const COMMAND_HELP: Record<string, string> = {
 
   --public   strip qaOnly steps and qa.* probes
   -o file    write JSON to file instead of stdout`,
-	check: `Usage: journey check [--strict] [--headed] [--slow-mo ms] [--config path]
+	check: `Usage: journey check [id...] [--strict] [--json] [--variant dim=value ...] [--headed] [--slow-mo ms] [--config path]
 
-  --strict        fail when any target is not a stable path
-  --headed        show the browser instead of running headless
-  --slow-mo <ms>  pause that long before each browser operation`,
+  id...                journeys to check, default all
+  --strict             fail when any target is not a stable path, and list those targets
+  --json               print one JSON report on stdout instead of a line per run
+  --variant dim=value  only run variants matching, may repeat
+  --headed             show the browser instead of running headless
+  --slow-mo <ms>       pause that long before each browser operation
+
+  exits 0 when every selected run passes, 1 otherwise`,
 	test: `Usage: journey test [playwright args...] [--headed] [--slow-mo ms] [--config path]
 
   --headed        show the browser instead of running headless
   --slow-mo <ms>  pause that long before each browser operation
   every other argument (--grep, --shard, --workers, --reporter, files...) is
   forwarded to playwright test in order; everything after -- is forwarded as is`,
-	record: `Usage: journey record <url> [-o dir] [--no-har] [--storage-state] [--headless] [--config path]
+	record: `Usage: journey record [url] [-o dir] [--no-har] [--storage-state] [--viewport name] [--headless] [--config path]
 
-  -o dir           output directory, default journeys
+  url              start url, default config app.url; a path is resolved against it
+  -o dir           output directory, default the config's journeys dir, else journeys
+  --viewport name  window size from config.variants.viewport, default its first one
   --no-har         do not record a HAR file
   --storage-state  save cookies and local storage to .journey/ (gitignored)
   --headless       run headless and exit after the first export`,
@@ -70,9 +81,16 @@ const COMMAND_HELP: Record<string, string> = {
   --slow-mo <ms>  pause that long before each browser operation`,
 };
 
-const VALUE_FLAGS = new Set(['config', 'o', 'variant', 'presenter', 'placement', 'slow-mo']);
+const VALUE_FLAGS = new Set([
+	'config',
+	'o',
+	'variant',
+	'presenter',
+	'placement',
+	'slow-mo',
+	'viewport',
+]);
 const REPEATABLE_FLAGS = new Set(['variant']);
-export const REPEAT_SEPARATOR = ',';
 
 function setFlag(out: Argv, name: string, value: string | boolean): void {
 	const previous = out.flags[name];
@@ -107,8 +125,12 @@ export function parseArgv(args: string[]): Argv {
 			const eq = name.indexOf('=');
 			if (eq >= 0) {
 				setFlag(out, name.slice(0, eq), name.slice(eq + 1));
-			} else if (VALUE_FLAGS.has(name) && i + 1 < args.length) {
-				setFlag(out, name, args[i + 1] as string);
+			} else if (VALUE_FLAGS.has(name)) {
+				const value = args[i + 1];
+				if (value === undefined || flagName(value) !== undefined) {
+					throw new Error(`journey: ${arg} needs a value`);
+				}
+				setFlag(out, name, value);
 				i += 1;
 			} else {
 				setFlag(out, name, true);
@@ -121,6 +143,27 @@ export function parseArgv(args: string[]): Argv {
 		i += 1;
 	}
 	return out;
+}
+
+const COMMON_FLAGS = ['config', 'help', 'version'];
+const BROWSER_FLAGS = ['headed', 'slow-mo'];
+const COMMAND_FLAGS: Record<string, string[]> = {
+	compile: ['public', 'o'],
+	check: ['strict', 'json', 'variant', ...BROWSER_FLAGS],
+	test: BROWSER_FLAGS,
+	record: ['o', 'har', 'no-har', 'storage-state', 'viewport', 'headless'],
+	book: ['presenter', 'placement', 'video', 'variant', ...BROWSER_FLAGS],
+	pages: BROWSER_FLAGS,
+};
+
+export function unknownFlags(argv: Argv): string | undefined {
+	const allowed = argv.command === undefined ? undefined : COMMAND_FLAGS[argv.command];
+	if (!allowed) return undefined;
+	const valid = [...allowed, ...COMMON_FLAGS];
+	const unknown = Object.keys(argv.flags).filter((name) => !valid.includes(name));
+	if (!unknown.length) return undefined;
+	const dash = (name: string) => (name.length === 1 ? `-${name}` : `--${name}`);
+	return `journey ${argv.command}: unknown option ${unknown.map(dash).join(', ')}, expected one of: ${valid.map(dash).join(', ')}`;
 }
 
 export function flagString(argv: Argv, name: string): string | undefined {
@@ -171,6 +214,11 @@ async function main(args: string[]): Promise<number> {
 	if (argv.flags.help) {
 		console.log(COMMAND_HELP[command] ?? USAGE);
 		return COMMAND_HELP[command] ? 0 : 1;
+	}
+	const unknown = unknownFlags(argv);
+	if (unknown) {
+		console.error(unknown);
+		return 1;
 	}
 	switch (command) {
 		case 'compile':

@@ -162,7 +162,7 @@ test('record plumbing writes source printed in node, scrubbed HAR and opt-in sto
 		storageState: true,
 		headless: true,
 	};
-	const har = join(dir, 'fixtures', 'recording.har');
+	const har = join(dir, '.journey', 'recording.har');
 	const context = await browser.newContext({ recordHar: { path: har, mode: 'minimal' } });
 	await context.addInitScript(RUNTIME_INIT);
 	await context.addInitScript(forwardExportScript());
@@ -217,13 +217,14 @@ test('record plumbing writes source printed in node, scrubbed HAR and opt-in sto
 	expect(files).toEqual([
 		join(dir, 'recorded.journey.ts'),
 		join(dir, '.journey', 'recorded.storage.json'),
-		join(dir, 'fixtures', 'recorded.har'),
 	]);
 	expect(readFileSync(files[0] as string, 'utf8')).toBe(print(compile(ir)));
 	expect(readFileSync(files[1] as string, 'utf8')).toContain('demo-marker');
 	expect(readFileSync(join(dir, '.journey', '.gitignore'), 'utf8')).toBe('*\n');
-	expect(finishHar(har, recorded, opts)).toBe(files[2]);
-	const written = readFileSync(files[2] as string, 'utf8');
+	const hars = finishHar(har, [recorded], opts);
+	expect(hars).toEqual([join(dir, 'fixtures', 'recorded.har')]);
+	expect(existsSync(har)).toBe(false);
+	const written = readFileSync(hars[0] as string, 'utf8');
 	expect(written).toContain('/login');
 	expect(written).not.toContain('s3cr3t');
 	expect(existsSync(join(dir, '..', 'escaped.journey.ts'))).toBe(false);
@@ -276,8 +277,18 @@ test.describe('book and pages', () => {
 		expect(md).toContain('![notes](01-notes.png)');
 		expect(md).toContain('**Welcome**');
 		const html = readFileSync(join(dir, 'index.html'), 'utf8');
+		expect(html.startsWith('<!doctype html>')).toBe(true);
+		expect(html).toContain('<meta charset="utf-8">');
 		expect(html).toContain('<figure>');
 		expect(html).toContain('<strong>Welcome</strong>');
+		expect(html).toContain('<track kind="captions" src="tour.vtt"');
+		expect(html).toContain('<img src="storyboard.png" alt="Storyboard">');
+		expect(variant?.captions).toBe('tour.vtt');
+		const vtt = readFileSync(join(dir, 'tour.vtt'), 'utf8');
+		expect(vtt.startsWith('WEBVTT\n\n1\n00:00:')).toBe(true);
+		const cues = [...vtt.matchAll(/^(\d\d:\d\d:\d\d\.\d{3}) --> (\d\d:\d\d:\d\d\.\d{3})\n(.+)$/gm)];
+		expect(cues.map((cue) => cue[3])).toEqual(['Welcome', 'New note', 'Save']);
+		for (const [, start, end] of cues) expect((start as string) < (end as string)).toBe(true);
 		const webm = join(dir, 'tour.webm');
 		const mp4 = join(dir, 'tour.mp4');
 		expect(existsSync(webm) || existsSync(mp4)).toBe(true);
@@ -316,6 +327,19 @@ test.describe('book and pages', () => {
 	});
 
 	test('a --variant that names no variant exits 1 with the valid values', async () => {
+		const narrow = await journey([
+			'check',
+			'settings-theme',
+			'--variant',
+			'viewport=mobile',
+			'--config',
+			config,
+		]);
+		expect(narrow.code).toBe(1);
+		expect(narrow.stderr).toContain(
+			'journey check: unknown viewport "mobile", expected one of: desktop',
+		);
+
 		const typo = await journey([
 			'book',
 			'create-note',
@@ -396,6 +420,69 @@ test.describe('book and pages', () => {
 		expect(md.match(/^\| !\[/gm)).toHaveLength(3);
 	});
 
+	test('pages applies the fixture storage state and the config masks', async ({ page }) => {
+		test.setTimeout(120000);
+		const dir = mkdtempSync(join(tmpdir(), 'journey-pages-'));
+		try {
+			writeFileSync(
+				join(dir, 'state.json'),
+				JSON.stringify({
+					origins: [{ origin: BASE, localStorage: [{ name: 'theme', value: 'dark' }] }],
+				}),
+			);
+			const shoot = async (name: string, mask: string[]): Promise<string> => {
+				const file = join(dir, `${name}.config.js`);
+				writeFileSync(
+					file,
+					`export default ${JSON.stringify({
+						app: { url: BASE },
+						out: name,
+						variants: { viewport: { desktop: { width: 1280, height: 800 } } },
+						fixtures: { dark: { storageState: 'state.json' } },
+						pages: [{ route: '/', name: 'home', fixture: 'dark' }],
+						mask,
+					})};\n`,
+				);
+				const run = await journey(['pages', '--config', file]);
+				expect(run.code, run.stdout + run.stderr).toBe(0);
+				return join(dir, name, 'pages', 'home', 'desktop.png');
+			};
+			const plain = await shoot('plain', []);
+			const masked = await shoot('masked', ['nav']);
+			await page.goto(BASE);
+			const nav = await page.locator('nav').boundingBox();
+			if (!nav) throw new Error('no nav');
+			const pixels = async (png: string, x: number, y: number, w: number, h: number) =>
+				page.evaluate(
+					async ([src, box]) => {
+						const img = new Image();
+						img.src = src;
+						await img.decode();
+						const canvas = document.createElement('canvas');
+						canvas.width = img.width;
+						canvas.height = img.height;
+						const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+						ctx.drawImage(img, 0, 0);
+						return Array.from(ctx.getImageData(box[0], box[1], box[2], box[3]).data).join(',');
+					},
+					[`data:image/png;base64,${readFileSync(png).toString('base64')}`, [x, y, w, h]] as const,
+				);
+			expect(await pixels(plain, 1270, 790, 1, 1)).toBe('20,22,26,255');
+			const region = [nav.x, nav.y, nav.width, nav.height].map(Math.round) as [
+				number,
+				number,
+				number,
+				number,
+			];
+			expect(await pixels(masked, ...region)).not.toBe(await pixels(plain, ...region));
+			expect(await pixels(masked, 1000, 600, 200, 100)).toBe(
+				await pixels(plain, 1000, 600, 200, 100),
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	test('help lists book and pages with their flags', async () => {
 		const help = await journey(['--help']);
 		expect(help.code).toBe(0);
@@ -449,7 +536,101 @@ test('a positional path passes --strict where the same target as a locator does 
 
 		const loose = await journey(['check', '--config', configFor('locator'), '--strict']);
 		expect(loose.code).toBe(1);
-		expect(loose.stdout).toMatch(/^✗ locator .*fallback 0 fragile 1/m);
+		expect(loose.stdout).toMatch(/^✗ locator .*fallback 0 fragile 1 strict: 1 unstable target$/m);
+		expect(loose.stdout).toContain(
+			'\n  step pick: fragile {"within":"notes/note[#0]","css":"[data-journey=\\"delete\\"]"}\n',
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('check runs only the journeys and variants asked for, and --json reports them for CI', async () => {
+	const json = await journey([
+		'check',
+		'create-note',
+		'--variant',
+		'viewport=mobile',
+		'--json',
+		'--config',
+		config,
+	]);
+	expect(json.code, json.stderr).toBe(0);
+	const report = JSON.parse(json.stdout);
+	expect(report).toMatchObject({ ok: true, strict: false, errors: [] });
+	expect(report.journeys).toHaveLength(1);
+	expect(report.journeys[0]).toMatchObject({
+		id: 'create-note',
+		file: 'demo/journeys/create-note.journey.ts',
+		ok: true,
+		targets: { fallback: 0, fragile: 0 },
+		unstable: [],
+		runs: [{ variant: { viewport: 'mobile', theme: 'light' }, ok: true, failures: [] }],
+	});
+
+	const unknown = await journey(['check', 'nope', '--json', '--config', config]);
+	expect(unknown.code).toBe(1);
+	expect(JSON.parse(unknown.stdout)).toEqual({
+		ok: false,
+		strict: false,
+		errors: [
+			'journey check: "nope" not among the configured journeys: create-note, settings-theme',
+		],
+		journeys: [],
+	});
+
+	const narrow = await journey([
+		'check',
+		'settings-theme',
+		'--variant',
+		'viewport=mobile',
+		'--config',
+		config,
+	]);
+	expect(narrow.code).toBe(1);
+	expect(narrow.stderr).toContain(
+		'journey check: unknown viewport "mobile", expected one of: desktop',
+	);
+
+	const typo = await journey(['check', '--strcit', '--config', config]);
+	expect(typo.code).toBe(1);
+	expect(typo.stderr).toContain('journey check: unknown option --strcit');
+	expect(typo.stdout).toBe('');
+});
+
+test('record reads the config, stages the raw HAR in .journey and cleans it up on Ctrl-C', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'journey-rec-'));
+	try {
+		writeFileSync(
+			join(dir, 'journey.config.js'),
+			`export default { app: { url: '${BASE}' }, journeys: 'flows/*.journey.ts' };\n`,
+		);
+		const child = spawn(
+			process.execPath,
+			[cli, 'record', '--headless', '--config', join(dir, 'journey.config.js')],
+			{ cwd: root, env: cleanEnv() },
+		);
+		let stdout = '';
+		let stderr = '';
+		child.stderr.on('data', (chunk: Buffer) => {
+			stderr += chunk.toString();
+		});
+		const code = new Promise<number>((done) => child.on('close', (c) => done(c ?? 1)));
+		await new Promise<void>((done, fail) => {
+			child.stdout.on('data', (chunk: Buffer) => {
+				stdout += chunk.toString();
+				if (stdout.includes('recording;')) done();
+			});
+			child.on('close', () => fail(new Error(`record exited early: ${stdout}${stderr}`)));
+		});
+		expect(existsSync(join(dir, '.journey', '.gitignore'))).toBe(true);
+		child.kill('SIGINT');
+		expect(await code, stderr).toBe(1);
+		expect(stderr).toContain('journey record: stopping');
+		expect(stderr).toContain(join(dir, 'flows', 'fixtures'));
+		expect(existsSync(join(dir, '.journey', 'recording.har'))).toBe(false);
+		expect(existsSync(join(dir, 'flows', 'fixtures', 'recording.har'))).toBe(false);
+		expect(existsSync(join(root, 'journeys'))).toBe(false);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

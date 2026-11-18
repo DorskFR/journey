@@ -16,14 +16,41 @@ export function interactiveAncestor(el: Element): Element {
 	return el.closest(INTERACTIVE) ?? el;
 }
 
-function chain(el: Element): Element[] {
-	const els: Element[] = [];
-	let cur: Element | null = el.closest('[data-journey]');
-	while (cur) {
-		els.unshift(cur);
-		cur = cur.parentElement?.closest('[data-journey]') ?? null;
+interface Link {
+	el: Element;
+	into: boolean;
+}
+
+function hostOf(el: Element): Element | null {
+	const root = el.getRootNode();
+	if ('host' in root && isElement(root.host)) return root.host;
+	if (root === document || root.nodeType !== Node.DOCUMENT_NODE) return null;
+	try {
+		return (root as Document).defaultView?.frameElement ?? null;
+	} catch {
+		return null;
 	}
-	return els;
+}
+
+function isElement(node: unknown): node is Element {
+	return typeof node === 'object' && node !== null && (node as Node).nodeType === 1;
+}
+
+function chain(el: Element): Link[] {
+	const links: Link[] = [];
+	let cur: Element | null = el;
+	let crossed = false;
+	while (cur) {
+		if (cur.hasAttribute('data-journey')) links.unshift({ el: cur, into: crossed });
+		else if (crossed) break;
+		crossed = false;
+		if (cur.parentElement) cur = cur.parentElement;
+		else {
+			cur = hostOf(cur);
+			crossed = true;
+		}
+	}
+	return links;
 }
 
 function segment(el: Element, keyed: boolean): string {
@@ -32,8 +59,13 @@ function segment(el: Element, keyed: boolean): string {
 	return keyed && key !== null && key !== '' ? `${name}[${key}]` : name;
 }
 
-function pathOf(els: Element[], keyedFrom: number): TargetPath {
-	return els.map((el, i) => segment(el, i >= keyedFrom)).join('/');
+function pathOf(links: Link[], keyedFrom: number): TargetPath {
+	return links
+		.map((link, i) => {
+			const sep = i === 0 ? '' : links[i - 1]?.into ? '>>' : '/';
+			return sep + segment(link.el, i >= keyedFrom);
+		})
+		.join('');
 }
 
 function matches(target: Target, el: Element): boolean {
@@ -44,30 +76,41 @@ function matches(target: Target, el: Element): boolean {
 	}
 }
 
-function scoped(els: Element[], el: Element): TargetPath | null {
-	for (let from = els.length; from >= 0; from -= 1) {
-		const path = pathOf(els, from);
+function scoped(links: Link[], el: Element): TargetPath | null {
+	for (let from = links.length; from >= 0; from -= 1) {
+		const path = pathOf(links, from);
 		if (matches(path, el)) return path;
 	}
 	return null;
 }
 
 export function journeyPath(el: Element): TargetPath | null {
-	const els = chain(el);
-	if (els.length === 0 || els[els.length - 1] !== el) return null;
-	return scoped(els, el);
+	const links = chain(el);
+	if (links.length === 0 || links[links.length - 1]?.el !== el) return null;
+	return scoped(links, el);
 }
 
-function containerPath(el: Element): TargetPath | null {
-	const container = el.parentElement?.closest('[data-journey]');
-	if (!container) return null;
-	const els = chain(container);
-	const path = journeyPath(container) ?? pathOf(els, 0);
+function reachable(el: Element): TargetPath | null {
+	const path = journeyPath(el) ?? pathOf(chain(el), 0);
+	if (path === '') return null;
 	try {
 		return runtime().resolvePath(path, {}, document).length > 0 ? path : null;
 	} catch {
 		return null;
 	}
+}
+
+function hostScope(el: Element): TargetPath | null {
+	const host = hostOf(el);
+	if (!host?.hasAttribute('data-journey')) return null;
+	const path = reachable(host);
+	return path === null ? null : `${path}>>`;
+}
+
+function containerPath(el: Element): TargetPath | null {
+	const container = el.parentElement?.closest('[data-journey]');
+	if (!container) return hostScope(el);
+	return reachable(container);
 }
 
 function labelOf(el: Element): string | null {
@@ -117,25 +160,28 @@ function nthOfType(el: Element): number {
 }
 
 function fragile(el: Element): Target {
+	const root = el.getRootNode();
+	const top = root.nodeType === Node.DOCUMENT_NODE ? (root as Document).body : null;
+	const scope = root === document ? undefined : (hostScope(el) ?? undefined);
+	const within = scope === undefined ? {} : { within: scope };
 	let anchor: Element | null = el.parentElement;
-	while (anchor && anchor !== document.body && !anchor.id && !anchor.hasAttribute('data-journey')) {
+	while (anchor && anchor !== top && !anchor.id && !anchor.hasAttribute('data-journey')) {
 		anchor = anchor.parentElement;
 	}
-	const stop = anchor ?? document.body;
 	const segments: string[] = [];
 	let cur: Element | null = el;
-	while (cur && cur !== stop) {
+	while (cur && cur !== anchor && cur !== top) {
 		segments.unshift(`${cur.tagName.toLowerCase()}:nth-of-type(${nthOfType(cur)})`);
 		cur = cur.parentElement;
 	}
-	if (segments.length === 0) return { css: el.tagName.toLowerCase() };
+	if (segments.length === 0) return { css: el.tagName.toLowerCase(), ...within };
 	const tail = segments.join(' > ');
-	if (stop.id) return { css: `#${CSS.escape(stop.id)} > ${tail}` };
-	if (stop !== document.body && stop.hasAttribute('data-journey')) {
-		const within = journeyPath(stop) ?? pathOf(chain(stop), 0);
-		return { css: `:scope > ${tail}`, within };
+	if (anchor?.id) return { css: `#${CSS.escape(anchor.id)} > ${tail}`, ...within };
+	if (anchor && anchor !== top && anchor.hasAttribute('data-journey')) {
+		const scopePath = journeyPath(anchor) ?? pathOf(chain(anchor), 0);
+		return { css: `:scope > ${tail}`, within: scopePath };
 	}
-	return { css: `body > ${tail}` };
+	return { css: anchor ? `body > ${tail}` : tail, ...within };
 }
 
 export function locate(origin: Element): Located {
