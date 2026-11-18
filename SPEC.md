@@ -176,6 +176,10 @@ export interface Journey {
 }
 ```
 
+Journey `id`, step `id`, capture `name` and journey `variants` values name
+files and selectors, so validation requires each to match
+`^[A-Za-z0-9][A-Za-z0-9._-]*$`.
+
 IR is `Journey` after validation and normalization: every default filled in,
 `capture` always an object, `do` always present, `guide` always present,
 `version` and `level` and `route` present, `steps[i].timeout` present. IR is
@@ -662,11 +666,17 @@ or cross.
   with `JOURNEY_CONFIG` set to the absolute config path, forwarding extra
   args and the exit code.
 - `record <url> [-o dir] [--har] [--no-har] [--storage-state]`: launches
-  headed Chromium with the runtime and editor injected and `editor: true`,
-  records HAR to `<dir>/fixtures/<id>.har` (default on) and storage state to
-  `<dir>/fixtures/<id>.storage.json` when the export event arrives, writes
-  `<dir>/<id>.journey.ts`, prints the paths, keeps the browser open until it
-  is closed. Default dir: `journeys`.
+  headed Chromium with the runtime and editor injected and `editor: true`.
+  The export binding takes only `{ ir }` from the page's main frame; the CLI
+  validates and compiles it and writes `<dir>/<id>.journey.ts` printed in
+  Node, ignoring any source or path the page sends. It records HAR to
+  `<dir>/fixtures/<id>.har` (default on), stripped of `authorization`,
+  `proxy-authorization`, `cookie` and `set-cookie` headers and of request
+  bodies holding a masked or secret-named field. `--storage-state` (off by
+  default) writes the storage state to `.journey/<id>.storage.json` under the
+  working directory, a directory that gitignores itself. Prints a warning
+  naming the secret-bearing files, prints the paths, keeps the browser open
+  until it is closed. Default dir: `journeys`.
 - `book [id...] [--presenter doc|spot|guide|none] [--video] [--variant dim=value]`: journeys
   are compiled with `public: false`: a `qaOnly` step is hidden from the app
   guide but still runs and captures in the book, so the storyboard matches
@@ -777,7 +787,12 @@ Unit (`tests/unit`):
 - `target.test.ts`: parse and format round trip, param keys, errors.
 - `validate.test.ts`: valid journey passes; rejects duplicate step ids,
   function values, unknown keys, bad target syntax, unknown expectation
-  shape, missing `steps`; error paths are precise.
+  shape, missing `steps`, ids and capture names outside the safe charset;
+  error paths are precise.
+- `record.test.ts`: the recorder prints source from the exported IR and
+  rejects unsafe ids; storage state is opt-in and lands outside the journeys
+  dir; the HAR loses auth headers and secret request bodies; `book` only
+  writes `<out>/<id>/<variant>`; the focus selector quotes the step id.
 - `compile.test.ts`: defaults filled; `public` strips `qaOnly` steps and `qa.`
   probes; `publicDrops` and `dropLine` name what a strip removed; IR is JSON
   serializable.

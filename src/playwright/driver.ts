@@ -64,6 +64,10 @@ export async function ensureMounted(page: Page): Promise<void> {
 	});
 }
 
+export function focusSelector(marker: string): string {
+	return `[data-journey-focus="${marker.replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\a ')}"]`;
+}
+
 export async function performAction(
 	page: Page,
 	marker: string,
@@ -71,7 +75,7 @@ export async function performAction(
 	timeout: number,
 	baseUrl: string,
 ): Promise<void> {
-	const locator = page.locator(`[data-journey-focus="${marker}"]`);
+	const locator = page.locator(focusSelector(marker));
 	switch (action.kind) {
 		case 'click':
 			await locator.click({ timeout });
@@ -105,7 +109,7 @@ export async function performAction(
 const HOVER_RETRY = 500;
 
 function targetBox(page: Page, marker: string): Promise<Rect | null> {
-	return page.locator(`[data-journey-focus="${marker}"]`).boundingBox();
+	return page.locator(focusSelector(marker)).boundingBox();
 }
 
 // pointerover only fires on the way in, so a page that starts listening after the

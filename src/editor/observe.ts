@@ -1,4 +1,5 @@
 import type { Interaction } from '../core/types.js';
+import { SENSITIVE_NAME } from '../core/validate.js';
 import { interactiveAncestor } from './locate.js';
 import { currentRoute } from './runtime.js';
 
@@ -43,7 +44,6 @@ const NON_TEXT_TYPES = new Set([
 	'color',
 	'hidden',
 ]);
-const SENSITIVE = /pass|token|secret|otp|card|cvc|ssn/i;
 const CLICK_ROUTE_WINDOW = 500;
 
 function inputType(el: Element): string {
@@ -72,7 +72,7 @@ export function isSensitive(el: Element): boolean {
 	const autocomplete = el.getAttribute('autocomplete') ?? '';
 	if (autocomplete.includes('one-time-code') || autocomplete.includes('cc-')) return true;
 	return [el.getAttribute('name'), el.getAttribute('id'), autocomplete].some(
-		(v) => v !== null && SENSITIVE.test(v),
+		(v) => v !== null && SENSITIVE_NAME.test(v),
 	);
 }
 

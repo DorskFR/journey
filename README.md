@@ -100,8 +100,16 @@ export default defineConfig({
 });
 ```
 
-Paths are relative to the config file. `journey record` also saves a HAR and
-the storage state next to the journey, so it replays offline.
+Paths are relative to the config file. `journey record` also saves a HAR to
+`journeys/fixtures/<id>.har` so the journey replays offline (`--no-har` to
+skip). Auth and cookie headers and request bodies with a secret field are
+removed, but response bodies stay: review the HAR before committing it.
+`--storage-state` also saves cookies and local storage to
+`.journey/<id>.storage.json`, a self-gitignored directory outside the
+journeys; it holds live session tokens, so never commit it.
+
+Journey ids, step ids, capture names and variant values become file names, so
+they must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (`create-note`, `step_2.a`).
 
 ## Watching a run
 
