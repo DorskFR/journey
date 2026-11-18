@@ -7,6 +7,9 @@ or screenshots and video that keep your docs in sync.
 npm i -D @dorsk/journey @playwright/test
 ```
 
+`@playwright/test` is an optional peer: an app that only ships the guide or
+the editor installs `@dorsk/journey` alone (see [In the app](#in-the-app)).
+
 One declarative `.journey.ts` file per flow. One in-page engine that runs it
 four ways:
 
@@ -100,7 +103,15 @@ export default defineConfig({
 });
 ```
 
-Paths are relative to the config file. `journey record` also saves a HAR to
+Paths are relative to the config file. Every command loads the config and
+the journeys with Playwright's TypeScript loader, the same one `journey test`
+uses, so extensionless imports, enums, `tsconfig` paths and packages without
+`"type": "module"` work everywhere. Without `@playwright/test`, `compile`
+falls back to Node type stripping: relative imports need their `.ts`
+extension, and enums, namespaces, parameter properties and `tsconfig` paths
+are not supported.
+
+`journey record` also saves a HAR to
 `journeys/fixtures/<id>.har` so the journey replays offline (`--no-har` to
 skip). Auth and cookie headers and request bodies with a secret field are
 removed, but response bodies stay: review the HAR before committing it.
@@ -111,6 +122,28 @@ journeys; it holds live session tokens, so never commit it.
 `check`, `book` and `pages` start `app.start` when `app.url` does not answer,
 and stop it on every exit, Ctrl-C included. When it never answers, the error
 ends with the last 40 lines it printed.
+
+A driven run (`check`, `test`, `book`) opens the app with `?journey=run` and
+keeps that flag on every page it loads, links and reloads included, so an app
+that mounts its probes and variant handlers only under `?journey=` keeps them
+after a full navigation. The run's variants are applied again after every
+load, so a journey that changes a varied setting itself (the theme of a
+`theme` variant) sees it reset on the next full navigation. A `viewport`
+value needs a size: one that is not `desktop`, `mobile` or declared in
+`variants.viewport` fails the run. `storageState` seeds cookies and local
+storage once, at the start; what the journey stores afterwards survives
+later loads.
+
+`book --variant dim=value` books only the matching variants; repeating a dim
+matches any of its values (`--variant viewport=desktop --variant
+viewport=mobile`), and an unknown dim or value exits 1 with the valid ones.
+The journey's `manifest.json` and index keep the variants already booked on
+disk.
+
+`pages` names each route's directory after its path, query and hash in
+lowercase letters, digits and `-`: `/` is `home`, `/users/1/edit` is
+`users-1-edit`, `/?tab=2` is `tab-2`. Two routes with one name (`/notes` and
+`/#notes`) fail: give one a `name`.
 
 Journey ids, step ids, capture names and variant values become file names, so
 they must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (`create-note`, `step_2.a`).
@@ -131,8 +164,10 @@ differ — treat those captures as a debugging aid, not as docs to commit.
 
 ## In the app
 
-Only needed for guide mode or the in-app editor. The runtime has no
-dependencies.
+Only needed for guide mode or the in-app editor. The runtime and the editor
+have no dependencies and do not need `@playwright/test`. Both import cleanly
+in Node (SSR, prerender, unit tests); `mount` and `mountEditor` must run in
+the browser.
 
 ```ts
 if (import.meta.env.PUBLIC_JOURNEY) {
@@ -149,6 +184,21 @@ if (import.meta.env.PUBLIC_JOURNEY) {
 
 Start a guide with `window.__journey.start('create-note')` or a
 `data-journey-start="create-note"` attribute on any element.
+
+An `autostart` journey starts when the location matches its `autostart.route`,
+which takes the same forms as a `url` expectation (`/dashboard`, `/#notes`,
+`/items/*`). It is checked at `register` and after every client-side
+navigation (`pushState`, `replaceState`, back and forward, hash changes), so
+an SPA needs no extra wiring.
+
+`when: { viewport }` steps follow the screen the guide starts on: below 768px
+wide it runs as `mobile`, otherwise `desktop`, and `locale` comes from
+`<html lang>`. Name your own values with `mount({ variant })`, an object or a
+function read at each start:
+
+```ts
+mount({ variant: () => ({ viewport: innerWidth < 1024 ? 'tablet' : 'desktop', theme: currentTheme() }) });
+```
 
 ### Params in the app
 

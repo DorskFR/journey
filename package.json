@@ -1,6 +1,6 @@
 {
   "name": "@dorsk/journey",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Record a user journey once. Replay it as a QA test, an in-app guided tour, or screenshots and video for docs.",
   "type": "module",
   "license": "MIT",
@@ -45,7 +45,7 @@
     },
     "./playwright": {
       "types": "./dist/playwright/index.d.ts",
-      "import": "./dist/playwright/index.js",
+      "import": "./dist/playwright/entry.js",
       "require": "./dist/playwright/index.cjs"
     },
     "./runtime.iife.js": "./dist/runtime.iife.js",
@@ -69,6 +69,11 @@
   },
   "peerDependencies": {
     "@playwright/test": "^1.59.0"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",

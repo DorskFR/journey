@@ -1,4 +1,5 @@
 import { glob } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Config, IR } from '../core/types.js';
@@ -34,9 +35,44 @@ export function withEnvVars(config: Config, env = envVars()): Config {
 	return { ...config, vars: { ...config.vars, ...env } };
 }
 
+type Importer = (file: string) => Promise<unknown>;
+
+export const STRIP_ONLY_HINT =
+	'TypeScript is loaded with Node type stripping because @playwright/test is not installed: ' +
+	'write relative imports with their .ts extension, and avoid enums, namespaces, parameter properties and tsconfig paths. ' +
+	'Install @playwright/test to load it like `journey test` does.';
+
+let playwrightImporter: Importer | null | undefined;
+
+function findPlaywrightImporter(): Importer | null {
+	try {
+		const fromJourney = createRequire(import.meta.url);
+		const fromTest = createRequire(fromJourney.resolve('@playwright/test/package.json'));
+		const common = fromTest('playwright/lib/common') as {
+			transform?: { requireOrImport?: unknown };
+		};
+		const requireOrImport = common.transform?.requireOrImport;
+		return typeof requireOrImport === 'function' ? (requireOrImport as Importer) : null;
+	} catch {
+		return null;
+	}
+}
+
+export async function importUserFile(file: string): Promise<unknown> {
+	playwrightImporter ??= findPlaywrightImporter();
+	if (playwrightImporter) return playwrightImporter(file);
+	try {
+		return await import(pathToFileURL(file).href);
+	} catch (error) {
+		if (!/\.[cm]?tsx?$/.test(file)) throw error;
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(`${message}\n${STRIP_ONLY_HINT}`, { cause: error });
+	}
+}
+
 export async function loadConfig(path?: string): Promise<LoadedConfig> {
 	const abs = configPath(path);
-	const config = importDefault<Config>(await import(pathToFileURL(abs).href));
+	const config = importDefault<Config>(await importUserFile(abs));
 	if (!config || typeof config !== 'object') {
 		throw new Error(`journey: ${abs} has no default export`);
 	}

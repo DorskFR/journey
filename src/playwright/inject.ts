@@ -28,12 +28,31 @@ export function editorSource(): string {
 	return readFileSync(editorPath(), 'utf8');
 }
 
+export const RUN_QUERY = 'journey';
+export const RUN_FLAG_KEY = 'journey:run';
+
 const injected = new WeakSet<BrowserContext>();
 
 export async function injectRuntime(context: BrowserContext): Promise<void> {
 	if (injected.has(context)) return;
 	injected.add(context);
+	await context.addInitScript(keepRunFlag, { key: RUN_FLAG_KEY, query: RUN_QUERY });
 	await context.addInitScript({ path: runtimePath() });
+}
+
+function keepRunFlag({ key, query }: { key: string; query: string }): void {
+	if (window !== window.top) return;
+	let flag: string | null;
+	try {
+		flag = sessionStorage.getItem(key);
+	} catch {
+		return;
+	}
+	if (flag === null) return;
+	const url = new URL(location.href);
+	if (url.searchParams.has(query)) return;
+	url.searchParams.set(query, flag);
+	history.replaceState(history.state, '', url.href);
 }
 
 export async function injectEditor(context: BrowserContext): Promise<void> {

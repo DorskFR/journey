@@ -3,7 +3,7 @@
 This file is the contract for the implementation. Anything not stated here is
 a decision to make in the simplest way that satisfies the tests. Do not add
 dependencies. The browser bundles have zero dependencies. The Node side uses
-only `@playwright/test` (peer) and Node built-ins.
+only `@playwright/test` (optional peer) and Node built-ins.
 
 Style: TypeScript strict, tabs, single quotes, semicolons, Biome recommended.
 Imports between source files use `.js` extensions (Node ESM). No comments
@@ -103,7 +103,15 @@ the `require` export conditions. Playwright transpiles a user's `.ts` config,
 journeys and specs to CommonJS when their package has no `"type": "module"`,
 and a `require` of an ES module that is still being linked by the runner
 fails, so those two entry points must exist in both formats. Dynamic imports
-of user files unwrap the extra `default` that such transpiled modules carry. The editor
+of user files unwrap the extra `default` that such transpiled modules carry.
+The CLI loads user files through `requireOrImport` from `playwright/lib/common`
+(resolved next to `@playwright/test`), so it accepts exactly what
+`journey test` accepts; without the peer it falls back to `import()` under Node
+type stripping and appends the supported subset to the error.
+`@playwright/test` is optional (`peerDependenciesMeta`): `.`, `./runtime` and
+`./editor` never import it, `./playwright` throws an install hint in both
+formats (ESM via the generated `dist/playwright/entry.js`), and CLI commands
+that need a browser print the same hint. The editor
 bundle imports core (print) and runtime pieces it needs; it must work when
 loaded after `runtime.iife.js` on a page, or as an ESM import in an app.
 
@@ -231,6 +239,12 @@ The `locale` value is also used to resolve `Record<Locale,string>` text and is
 passed to the `translate` hook. Default variant when none declared:
 `{ viewport: 'desktop' }` with desktop = 1280x800 and mobile = 390x844 built in.
 
+An in-app start (anything but the driver) builds its variant at each start, in
+increasing precedence: `{ viewport: 'desktop' }`, the detected
+`{ viewport: matchMedia('(max-width: 767px)').matches ? 'mobile' : 'desktop', locale: <html lang> }`
+(`locale` only when `lang` is set), the mount `variant`, then
+`start(id, { variant })`. A resumed run keeps the variant it was saved with.
+
 ## 4. Target paths
 
 Grammar: `segment ( '/' segment )*`,
@@ -307,6 +321,8 @@ interface MountOptions {
 	                                           // overrides for the runtime's own text; a function is called with the current locale at show time
 	params?: Record<string, string> | ((id: string) => Record<string, string> | undefined);
 	                                           // under the params of every start, resume included; a function is called per start
+	variant?: Record<string, string> | (() => Record<string, string>);
+	                                           // over the detected variant of every start; a function is called per start
 }
 
 interface Strings {
@@ -362,7 +378,11 @@ itself.
 
 Also: a delegated click listener on `[data-journey-start]` calls
 `start(value)`. `autostart` journeys start in guide mode when the current
-pathname equals their `autostart.route`; `once` is remembered in
+location matches their `autostart.route` like a `url` expectation (below),
+checked at `register` and again after every client-side navigation (the
+Navigation API's `currententrychange`, or `pushState`, `replaceState`,
+`popstate` and `hashchange` where it is missing), unless a run is active;
+`once` is remembered in
 `localStorage['journey:done:<id>@<version>']` when the run completes or the
 user exits it, not when it fails. On mount, if
 `sessionStorage['journey:progress']` exists for a listed journey, the run
@@ -551,6 +571,8 @@ the host passes to `load` again.
 panel inside the overlay `panel` slot: buttons Record/Stop, Preview, Run,
 Export, and the step list. It is also what `mount({ editor: true })` calls
 when the editor module is present (`window.journeyEditor` or import).
+Importing the module has no effect outside a browser; `mountEditor` there
+throws `journey: mountEditor needs a browser; call it client-side`.
 
 Observation (`observe.ts`): capturing listeners on `document` for `click`,
 `dblclick`, `input`, `change`, `keydown`, and navigation (`popstate`,
@@ -648,15 +670,19 @@ protocol is used out of order.
 `inject.ts`: `runtimeSource()` and `editorSource()` read the IIFE files from
 `dist` next to the compiled module (`new URL('../runtime.iife.js', import.meta.url)`).
 
-`driver.ts`: the start URL gets a `journey=run` query parameter so an app
-can decide to mount the runtime with its probes and variant handlers for
-driven runs (the demo does); the driver only mounts `{}` itself when the app
-did not. `runJourney(page, ir, opts)` where opts are
+`driver.ts`: every same-origin URL the driver opens gets a `journey=run` query
+parameter so an app can decide to mount the runtime with its probes and
+variant handlers for driven runs (the demo does); the driver only mounts `{}`
+itself when the app did not. For the length of a run the flag also sits in
+`sessionStorage` (`journey:run`), and an init script puts it back into the URL
+with `history.replaceState` before the app's scripts on any document the run
+loads without it (a link, a reload, a form post). `runJourney(page, ir, opts)` where opts are
 `{ baseUrl, params, variant, presenter, mask, pace, onCapture?: (spec, ctx) => Promise<void>, applyVariant?: boolean }`.
 It adds the runtime as an init script on the page's context if not already
-added (track with a WeakSet), sets the viewport for the variant, navigates to
-`baseUrl + ir.route`, applies non-viewport variant dims via
-`applyVariant`, then loops on the protocol. Actions map to `locator.click()`,
+added (track with a WeakSet), sets the viewport for the variant (an unknown
+viewport name throws), navigates to `baseUrl + ir.route`, applies non-viewport
+variant dims via `applyVariant`, then loops on the protocol, applying them
+again after every later document load. Actions map to `locator.click()`,
 `dblclick()`, `fill()`, `selectOption()`, `setChecked()`, `press()`, `hover()`,
 `page.goto()`. Returns `RunResult`. Per-action Playwright timeout equals the
 step timeout.
@@ -674,7 +700,8 @@ same journey.
 `fixtures.ts`: `applyFixture(name, config, ctx)` runs `command` and polls
 `ready` (default `app.url`) until 200 or `timeout`, returns a stop function;
 `routeFromHAR(har, { url: harUrl, notFound })` on the context; `storageState`
-is passed at context creation; `setup` returns params merged under
+is applied once per context: cookies with `addCookies`, local storage by an
+init script that runs on the first document of each origin per tab only; `setup` returns params merged under
 `fixture.*`; `params` merged the same way. Config `vars` are exposed under
 `var.*` and the variant under `variant.*`.
 
@@ -748,11 +775,19 @@ or cross.
   `tour.webm` when `--video` or any capture has `video`, converts to `mp4`
   and `gif` when ffmpeg exists (formats from config, default webm and mp4),
   writes `storyboard.png`, `manifest.json`, `index.md`, `index.html`.
+  `--variant` repeats of one dim are OR, dims are AND; an unknown dim or value,
+  or a filter no selected journey matches, exits 1 listing the valid ones. The
+  journey-level `<out>/book/<id>/manifest.json` and index merge this run's
+  variants with the ones already booked on disk, in matrix order.
   `variantKey` is the dims joined with `-` in config order, for example
   `desktop-light`.
 - `pages`: for each `config.pages` route and variant, navigates and captures
   the viewport to `<out>/pages/<name>/<variantKey>.png`, writes
-  `<out>/pages/index.md` with a table per page.
+  `<out>/pages/index.md` with a table per page. The default `name` is the
+  route's path (without its extension), query and hash, lowercased, with every
+  run of other characters turned into `-`, `home` when empty. A `name` must
+  match `^[A-Za-z0-9][A-Za-z0-9._-]*$`; two pages with one name (case-folded)
+  fail before anything runs.
 
 `media.ts`: `hasFfmpeg()`; `toMp4(webm, mp4)` with
 `-c:v libx264 -pix_fmt yuv420p -movflags +faststart -crf 23`; `toGif(webm, gif)`
@@ -908,6 +943,13 @@ Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
   and assert the output files exist with the manifest structure; skip mp4
   and gif assertions when `hasFfmpeg()` is false. Run `journey test` too and
   assert exit 0.
+- `loaders.spec.ts`: in temp projects outside the repo, `compile` loads an
+  extensionless import, an enum and a `tsconfig` path in both a CommonJS and
+  an ESM package with no warning; with a copied package and no
+  `@playwright/test`, `.`, `./runtime` and `./editor` import and require in
+  Node, `mountEditor` names the browser requirement, `./playwright` and
+  `check` print the install hint, and a strip-only failure in `compile`
+  states the supported subset.
 
 All tests must pass with `npm test` locally and in CI on Ubuntu with
 Chromium only.

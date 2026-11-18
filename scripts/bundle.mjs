@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { build } from 'esbuild';
 
 const browser = {
@@ -38,9 +39,44 @@ const cjs = {
 };
 
 await build({ ...cjs, entryPoints: ['src/index.ts'], outfile: 'dist/index.cjs' });
+const PEER_HELP = JSON.stringify(
+	'@dorsk/journey/playwright needs @playwright/test. Install it with:  npm i -D @playwright/test',
+);
+
 await build({
 	...cjs,
 	entryPoints: ['src/playwright/index.ts'],
 	outfile: 'dist/playwright/index.cjs',
 	external: ['@playwright/test'],
+	banner: {
+		js: `${cjs.banner.js}\ntry { require.resolve("@playwright/test"); } catch { throw new Error(${PEER_HELP}); }`,
+	},
 });
+
+const surface = await build({
+	entryPoints: ['src/playwright/index.ts'],
+	outfile: 'dist/playwright/entry.js',
+	bundle: true,
+	format: 'esm',
+	platform: 'node',
+	packages: 'external',
+	metafile: true,
+	write: false,
+	logLevel: 'silent',
+});
+const names = Object.values(surface.metafile.outputs).flatMap((output) => output.exports);
+if (!names.includes('test')) throw new Error('bundle: could not list the playwright entry exports');
+writeFileSync(
+	'dist/playwright/entry.js',
+	`let mod;
+try {
+	mod = await import('./index.js');
+} catch (error) {
+	if (error?.code === 'ERR_MODULE_NOT_FOUND' && String(error.message).includes("'@playwright/test'")) {
+		throw new Error(${PEER_HELP}, { cause: error });
+	}
+	throw error;
+}
+export const { ${names.join(', ')} } = mod;
+`,
+);
