@@ -1,7 +1,7 @@
-import { chromium } from '@playwright/test';
 import type { IR, Target } from '../core/types.js';
+import { errorLine } from '../playwright/driver.js';
 import { failureMessage, runConfigured } from '../playwright/index.js';
-import { ensureApp } from './app.js';
+import { withAppBrowser } from './app.js';
 import { loadConfig, variantLabel, variantMatrix } from './config.js';
 import { HARNESS_COMPILE, loadJourneys } from './load.js';
 import { type Argv, flagString, launchOptions } from './main.js';
@@ -30,10 +30,8 @@ export async function runCheck(argv: Argv): Promise<number> {
 	}
 	const strict = argv.flags.strict === true;
 	const launch = launchOptions(argv);
-	const stopApp = await ensureApp(loaded);
-	const browser = await chromium.launch(launch);
 	let failed = 0;
-	try {
+	await withAppBrowser(loaded, launch, async (browser) => {
 		for (const entry of journeys) {
 			const counts = healthCounts(entry.ir);
 			for (const variant of variantMatrix(loaded.config, entry.ir)) {
@@ -47,7 +45,8 @@ export async function runCheck(argv: Argv): Promise<number> {
 					line = ok ? '' : failureMessage(result).replace(/\n/g, '; ');
 				} catch (error) {
 					ok = false;
-					line = error instanceof Error ? error.message : String(error);
+					line = errorLine(error);
+					console.error(error instanceof Error ? error.message : String(error));
 				} finally {
 					await context.close();
 				}
@@ -60,9 +59,6 @@ export async function runCheck(argv: Argv): Promise<number> {
 				);
 			}
 		}
-	} finally {
-		await browser.close();
-		await stopApp();
-	}
+	});
 	return failed ? 1 : 0;
 }

@@ -43,7 +43,8 @@ const COMMAND_HELP: Record<string, string> = {
 
   --headed        show the browser instead of running headless
   --slow-mo <ms>  pause that long before each browser operation
-  extra arguments are forwarded to playwright test`,
+  every other argument (--grep, --shard, --workers, --reporter, files...) is
+  forwarded to playwright test in order; everything after -- is forwarded as is`,
 	record: `Usage: journey record <url> [-o dir] [--no-har] [--storage-state] [--headless] [--config path]
 
   -o dir           output directory, default journeys
@@ -82,6 +83,13 @@ function setFlag(out: Argv, name: string, value: string | boolean): void {
 	out.flags[name] = value;
 }
 
+const TEST_FLAGS = new Set(['config', 'headed', 'slow-mo', 'help']);
+
+function flagName(arg: string): string | undefined {
+	if (!arg.startsWith('--') && !(arg.length === 2 && arg.startsWith('-'))) return undefined;
+	return arg.replace(/^-+/, '').split('=')[0];
+}
+
 export function parseArgv(args: string[]): Argv {
 	const out: Argv = { command: undefined, positional: [], flags: {}, rest: [] };
 	let i = 0;
@@ -91,7 +99,10 @@ export function parseArgv(args: string[]): Argv {
 			out.rest.push(...args.slice(i + 1));
 			break;
 		}
-		if (arg.startsWith('--') || (arg.length === 2 && arg.startsWith('-'))) {
+		const flag = flagName(arg);
+		if (out.command === 'test' && (flag === undefined || !TEST_FLAGS.has(flag))) {
+			out.rest.push(arg);
+		} else if (flag !== undefined) {
 			const name = arg.replace(/^-+/, '');
 			const eq = name.indexOf('=');
 			if (eq >= 0) {

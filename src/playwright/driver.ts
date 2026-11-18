@@ -68,6 +68,11 @@ export function focusSelector(marker: string): string {
 	return `[data-journey-focus="${marker.replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\a ')}"]`;
 }
 
+export function errorLine(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.split('\n')[0]?.trim() ?? '';
+}
+
 export async function performAction(
 	page: Page,
 	marker: string,
@@ -264,7 +269,15 @@ export async function runJourney(page: Page, ir: IR, opts: RunOptions): Promise<
 		const timeout = ir.steps[r.index]?.timeout ?? 10000;
 		let hovered: Rect | null = null;
 		if (r.action && r.marker) {
-			await performAction(page, r.marker, r.action, timeout, opts.baseUrl);
+			try {
+				await performAction(page, r.marker, r.action, timeout, opts.baseUrl);
+			} catch (error) {
+				return finish({
+					ok: false,
+					completed,
+					failures: [{ stepId: r.stepId, error: `${r.action.kind} failed: ${errorLine(error)}` }],
+				});
+			}
 			if (r.action.kind === 'hover') hovered = await targetBox(page, r.marker);
 		}
 		let settled: SettleResult;

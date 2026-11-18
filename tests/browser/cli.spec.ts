@@ -1,8 +1,17 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+	existsSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 import { expect, test } from '@playwright/test';
 import demoConfig from '../../demo/journey.config.js';
 import { variantKey, variantMatrix } from '../../src/cli/config.js';
@@ -94,9 +103,51 @@ test('check runs every journey and variant against the running demo', async () =
 
 test('test spawns playwright with the generated config and exits 0', async () => {
 	test.setTimeout(180000);
-	const run = await journey(['test', '--config', config]);
+	const run = await journey(['test', '--config', config, '--workers', '2']);
 	expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
+	expect(stripVTControlCharacters(run.stdout)).toContain('Running 3 tests using 2 workers');
 	expect(run.stdout).toContain('3 passed');
+});
+
+test('test forwards playwright flags, and a failure leaves a trace, a screenshot and a report', async () => {
+	test.setTimeout(180000);
+	const dir = mkdtempSync(join(tmpdir(), 'journey-test-'));
+	try {
+		writeFileSync(
+			join(dir, 'journey.config.ts'),
+			`export default { app: { url: '${BASE}' }, journeys: '*.journey.ts', out: 'out' };\n`,
+		);
+		for (const id of ['passes', 'fails']) {
+			const expectation = id === 'fails' ? `{ visible: 'missing' }` : `{ visible: 'nav' }`;
+			writeFileSync(
+				join(dir, `${id}.journey.ts`),
+				`export default { id: '${id}', title: '${id}', route: '/', steps: [{ id: 'look', timeout: 500, expect: [${expectation}] }] };\n`,
+			);
+		}
+		const run = await journey([
+			'test',
+			'--config',
+			join(dir, 'journey.config.ts'),
+			'--grep',
+			'fails',
+			'--workers',
+			'1',
+			'--retries=0',
+		]);
+		const output = `${run.stdout}\n${run.stderr}`;
+		expect(run.code, output).toBe(1);
+		expect(stripVTControlCharacters(run.stdout), output).toContain('Running 1 test using 1 worker');
+		expect(stripVTControlCharacters(run.stdout), output).toContain('1 failed');
+		const results = join(dir, 'out', '.test-results');
+		const [failed] = readdirSync(results).filter((name) => name.includes('fails'));
+		expect(failed, output).toBeDefined();
+		const files = readdirSync(join(results, failed as string));
+		expect(files).toContain('trace.zip');
+		expect(files).toContain('test-failed-1.png');
+		expect(existsSync(join(dir, 'out', '.test-report', 'index.html'))).toBe(true);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test('record plumbing writes source printed in node, scrubbed HAR and opt-in storage state', async ({
@@ -205,7 +256,7 @@ test.describe('book and pages', () => {
 		const key = keys[0] as string;
 		expect(run.stdout.trim().split('\n')).toHaveLength(1);
 		expect(run.stdout).toContain(`✓ create-note`);
-		const dir = join(out, 'create-note', key);
+		const dir = join(out, 'book', 'create-note', key);
 		for (const file of ['01-notes.png', '02-dialog.png', '03-saved.png', 'storyboard.png']) {
 			expect(existsSync(join(dir, file)), file).toBe(true);
 		}
@@ -237,7 +288,7 @@ test.describe('book and pages', () => {
 			expect(variant?.video?.webm).toBe('tour.webm');
 		}
 		const combined = JSON.parse(
-			readFileSync(join(out, 'create-note', 'manifest.json'), 'utf8'),
+			readFileSync(join(out, 'book', 'create-note', 'manifest.json'), 'utf8'),
 		) as Manifest;
 		expect(combined.variants[key]?.captures[0]?.file).toBe(`${key}/01-notes.png`);
 	});
@@ -257,7 +308,7 @@ test.describe('book and pages', () => {
 		expect(keys).toEqual(['desktop-light']);
 		expect(run.stdout.trim().split('\n')).toHaveLength(keys.length);
 		for (const key of keys) {
-			const dir = join(out, 'settings-theme', key);
+			const dir = join(out, 'book', 'settings-theme', key);
 			expect(existsSync(join(dir, '01-dark.png')), key).toBe(true);
 			expect(existsSync(join(dir, '02-dark.png'))).toBe(false);
 			const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
@@ -277,7 +328,7 @@ test.describe('book and pages', () => {
 		]);
 		expect(run.code, run.stderr).toBe(0);
 		const key = variantKey(variantMatrix(demoConfig, settingsThemeIR)[0] as Record<string, string>);
-		const dir = join(out, 'settings-theme', key);
+		const dir = join(out, 'book', 'settings-theme', key);
 		expect(existsSync(join(dir, '01-dark.png'))).toBe(true);
 		const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
 		const captures = manifest.variants[key]?.captures ?? [];

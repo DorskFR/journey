@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import type { Socket } from 'node:net';
 import { isAbsolute, resolve } from 'node:path';
 import type { APIRequestContext, BrowserContext } from '@playwright/test';
 import type { Config, Fixture } from '../core/types.js';
@@ -48,14 +49,72 @@ export async function waitForUrl(
 	const deadline = Date.now() + timeout;
 	while (Date.now() < deadline) {
 		if (await answers(url)) return;
-		if (child && child.exitCode !== null) {
-			throw new Error(
-				`journey: command exited with code ${child.exitCode} before ${url} was ready`,
-			);
+		if (child && (child.exitCode !== null || child.signalCode !== null)) {
+			const how =
+				child.exitCode !== null ? `with code ${child.exitCode}` : `on ${child.signalCode}`;
+			throw new Error(`journey: command exited ${how} before ${url} was ready`);
 		}
 		await new Promise((r) => setTimeout(r, 250));
 	}
 	throw new Error(`journey: ${url} did not answer 200 within ${timeout} ms`);
+}
+
+export const OUTPUT_LINES = 40;
+const KILL_GRACE = 5000;
+
+export class OutputTail {
+	private lines: string[] = [];
+	private partial = '';
+
+	constructor(private readonly max = OUTPUT_LINES) {}
+
+	push(chunk: Buffer | string): void {
+		const parts = (this.partial + chunk.toString()).split(/\r?\n/);
+		this.partial = parts.pop() ?? '';
+		this.lines.push(...parts);
+		if (this.lines.length > this.max) this.lines.splice(0, this.lines.length - this.max);
+	}
+
+	text(): string {
+		const all = this.partial ? [...this.lines, this.partial] : this.lines;
+		return all.slice(-this.max).join('\n');
+	}
+}
+
+const running = new Set<ChildProcess>();
+
+function signalTree(child: ChildProcess, signal: NodeJS.Signals): void {
+	try {
+		if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal);
+		else child.kill(signal);
+	} catch {}
+}
+
+function killAllNow(): void {
+	for (const child of running) signalTree(child, 'SIGTERM');
+}
+
+const SIGNAL_EXIT: Partial<Record<NodeJS.Signals, number>> = { SIGINT: 130, SIGTERM: 143 };
+
+function onSignal(signal: NodeJS.Signals): void {
+	killAllNow();
+	process.exit(SIGNAL_EXIT[signal] ?? 1);
+}
+
+function track(child: ChildProcess): void {
+	if (!running.size) {
+		process.on('SIGINT', onSignal);
+		process.on('SIGTERM', onSignal);
+		process.on('exit', killAllNow);
+	}
+	running.add(child);
+	child.once('exit', () => {
+		running.delete(child);
+		if (running.size) return;
+		process.off('SIGINT', onSignal);
+		process.off('SIGTERM', onSignal);
+		process.off('exit', killAllNow);
+	});
 }
 
 export function killTree(child: ChildProcess): Promise<void> {
@@ -64,13 +123,12 @@ export function killTree(child: ChildProcess): Promise<void> {
 			done();
 			return;
 		}
-		child.once('exit', () => done());
-		try {
-			if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGTERM');
-			else child.kill();
-		} catch {
+		const force = setTimeout(() => signalTree(child, 'SIGKILL'), KILL_GRACE);
+		child.once('exit', () => {
+			clearTimeout(force);
 			done();
-		}
+		});
+		signalTree(child, 'SIGTERM');
 	});
 }
 
@@ -79,15 +137,33 @@ export async function startCommand(command: string, opts: CommandOptions): Promi
 		shell: true,
 		cwd: opts.cwd,
 		env: { ...process.env, ...opts.env },
-		stdio: 'ignore',
+		stdio: ['ignore', 'pipe', 'pipe'],
 		detached: process.platform !== 'win32',
 	});
+	track(child);
+	const tail = new OutputTail();
+	child.stdout?.on('data', (chunk: Buffer) => tail.push(chunk));
+	child.stderr?.on('data', (chunk: Buffer) => tail.push(chunk));
+	const spawned = new Promise<Error | undefined>((done) => {
+		child.once('spawn', () => done(undefined));
+		child.once('error', done);
+	});
 	try {
+		const failed = await spawned;
+		if (failed) throw new Error(`journey: could not start "${command}": ${failed.message}`);
 		await waitForUrl(opts.ready, opts.timeout ?? DEFAULT_TIMEOUT, child);
 	} catch (error) {
 		await killTree(child);
-		throw error;
+		const output = tail.text();
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			output
+				? `${message}\nlast output of "${command}":\n${output}`
+				: `${message}\n"${command}" printed nothing`,
+		);
 	}
+	for (const stream of [child.stdout, child.stderr]) (stream as Socket | null)?.unref();
+	child.unref();
 	return () => killTree(child);
 }
 

@@ -14,9 +14,16 @@ export default defineConfig({
 	snapshotDir: out,
 	snapshotPathTemplate: '{snapshotDir}/{arg}{ext}',
 	outputDir: join(out, '.test-results'),
-	reporter: process.env.CI ? 'github' : 'list',
+	fullyParallel: true,
+	retries: process.env.CI ? 1 : 0,
+	reporter: [
+		[process.env.CI ? 'github' : 'list'],
+		['html', { outputFolder: join(out, '.test-report'), open: 'never' }],
+	],
 	use: {
 		browserName: 'chromium',
+		trace: 'retain-on-failure',
+		screenshot: 'only-on-failure',
 		...(Number.isFinite(slowMo) && slowMo > 0 ? { launchOptions: { slowMo } } : {}),
 	},
 	webServer: app?.start

@@ -1,10 +1,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium } from '@playwright/test';
 import type { Config } from '../core/types.js';
-import { ensureMounted, startUrl } from '../playwright/driver.js';
+import { ensureMounted, errorLine, startUrl } from '../playwright/driver.js';
 import { injectRuntime } from '../playwright/inject.js';
-import { ensureApp } from './app.js';
+import { withAppBrowser } from './app.js';
 import {
 	baseUrl,
 	type LoadedConfig,
@@ -94,11 +93,9 @@ export async function runPages(argv: Argv): Promise<number> {
 	const out = join(outDir(loaded), 'pages');
 	const sizes = viewports(loaded.config);
 	const launch = launchOptions(argv);
-	const stopApp = await ensureApp(loaded);
-	const browser = await chromium.launch(launch);
 	let failed = 0;
 	const index: Array<{ name: string; route: string; keys: string[] }> = [];
-	try {
+	await withAppBrowser(loaded, launch, async (browser) => {
 		for (const entry of entries) {
 			const dir = join(out, entry.name);
 			mkdirSync(dir, { recursive: true });
@@ -116,7 +113,7 @@ export async function runPages(argv: Argv): Promise<number> {
 					keys.push(key);
 				} catch (e) {
 					ok = false;
-					error = e instanceof Error ? e.message : String(e);
+					error = errorLine(e);
 				} finally {
 					await context.close();
 				}
@@ -128,9 +125,6 @@ export async function runPages(argv: Argv): Promise<number> {
 			index.push({ name: entry.name, route: entry.route, keys });
 		}
 		writeFileSync(join(out, 'index.md'), renderPagesIndex(index));
-	} finally {
-		await browser.close();
-		await stopApp();
-	}
+	});
 	return failed ? 1 : 0;
 }
