@@ -2,12 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import {
-	checkVariantFilter,
-	matchesFilter,
-	mergeJourneyManifest,
-	parseVariantFilter,
-} from '../../src/cli/book.js';
+import { mergeJourneyManifest } from '../../src/cli/book.js';
+import { checkVariantFilter, matchesFilter, parseVariantFilter } from '../../src/cli/config.js';
 import { parseArgv } from '../../src/cli/main.js';
 import { pageEntries, pageName } from '../../src/cli/pages.js';
 import type { Manifest } from '../../src/cli/report.js';
@@ -20,6 +16,7 @@ const matrix = [
 function filterOf(...pairs: string[]) {
 	return parseVariantFilter(
 		parseArgv(['book', ...pairs.flatMap((p) => ['--variant', p])]).flags.variant as string,
+		'book',
 	);
 }
 
@@ -31,19 +28,20 @@ test('repeating a --variant dim matches any of its values', () => {
 });
 
 test('an unknown --variant dim or value is rejected with the valid ones', () => {
-	expect(() => checkVariantFilter(filterOf('viewport=dekstop'), [matrix])).toThrow(
+	expect(() => checkVariantFilter(filterOf('viewport=dekstop'), [matrix], 'book')).toThrow(
 		'journey book: unknown viewport "dekstop", expected one of: desktop, mobile',
 	);
-	expect(() => checkVariantFilter(filterOf('veiwport=desktop'), [matrix])).toThrow(
+	expect(() => checkVariantFilter(filterOf('veiwport=desktop'), [matrix], 'book')).toThrow(
 		'journey book: unknown variant dim "veiwport", expected one of: viewport, theme',
 	);
 	expect(() =>
-		checkVariantFilter(filterOf('viewport=mobile', 'theme=dark'), [
-			matrix,
-			[{ viewport: 'desktop', theme: 'dark' }],
-		]),
+		checkVariantFilter(
+			filterOf('viewport=mobile', 'theme=dark'),
+			[matrix, [{ viewport: 'desktop', theme: 'dark' }]],
+			'book',
+		),
 	).toThrow('no variant of the selected journeys matches --variant viewport=mobile theme=dark');
-	expect(() => checkVariantFilter(filterOf('viewport=mobile'), [matrix])).not.toThrow();
+	expect(() => checkVariantFilter(filterOf('viewport=mobile'), [matrix], 'book')).not.toThrow();
 });
 
 test('booking a subset keeps the variants already booked on disk in the journey manifest', () => {

@@ -2,7 +2,7 @@ import { glob } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { Config, IR } from '../core/types.js';
+import type { Config, IR, TestConfig } from '../core/types.js';
 import { BUILTIN_VIEWPORTS, type Viewport } from '../playwright/driver.js';
 
 export const DEFAULT_CONFIG = 'journey.config.ts';
@@ -253,4 +253,24 @@ export function selectById<T extends { ir: IR }>(
 		);
 	}
 	return entries.filter((entry) => ids.includes(entry.ir.id));
+}
+
+const TEST_OPTIONS = [
+	'retries',
+	'workers',
+	'fullyParallel',
+	'timeout',
+	'maxFailures',
+	'forbidOnly',
+	'expect',
+] as const;
+
+export function testSettings(config: Config): {
+	options: Omit<TestConfig, 'use'>;
+	use: NonNullable<TestConfig['use']>;
+} {
+	const test = config.test ?? {};
+	const options: Record<string, unknown> = {};
+	for (const key of TEST_OPTIONS) if (test[key] !== undefined) options[key] = test[key];
+	return { options, use: { ...test.use } };
 }

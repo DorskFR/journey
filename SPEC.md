@@ -210,10 +210,10 @@ that directory as their working directory unless `cwd` is set:
 
 ```ts
 export interface Fixture {
-	command?: string; cwd?: string; ready?: string;   // start a process, poll ready URL (200)
+	command?: string; cwd?: string; ready?: string;   // with ready: a server polled until it answers < 500; without: run to exit 0
 	har?: string; harUrl?: string; notFound?: 'abort' | 'fallback';
 	storageState?: string;
-	setup?: (ctx: { baseUrl: string; request: import('@playwright/test').APIRequestContext }) => Promise<Record<string, string> | void>;
+	setup?: (ctx: { baseUrl: string; request: FixtureRequest }) => Promise<Record<string, string> | void>;  // FixtureRequest: the get/post/put/patch/delete/head/fetch subset of Playwright's APIRequestContext, typed without importing @playwright/test
 	params?: Record<string, string>;
 }
 export interface Config {
@@ -229,6 +229,7 @@ export interface Config {
 	presenter?: 'doc' | 'spot' | 'guide' | 'none';  // book default 'doc'
 	video?: { size?: { width: number; height: number }; formats?: Array<'webm' | 'mp4' | 'gif'> };
 	pace?: { beforeAction?: number; afterSettle?: number };  // book only, ms, default 600 / 800
+	test?: { retries?; workers?; fullyParallel?; timeout?; maxFailures?; forbidOnly?; expect?: { timeout? }; use?: { trace?; screenshot?; video?; [option]: unknown } };  // journey test defaults, CLI flags win
 }
 ```
 
@@ -732,7 +733,9 @@ itself when the app did not. For the length of a run the flag also sits in
 `sessionStorage` (`journey:run`), and an init script puts it back into the URL
 with `history.replaceState` before the app's scripts on any document the run
 loads without it (a link, a reload, a form post). `runJourney(page, ir, opts)` where opts are
-`{ baseUrl, params, variant, presenter, mask, pace, onCapture?: (spec, ctx) => Promise<void>, applyVariant?: boolean }`.
+`{ baseUrl, params, variant, presenter, mask, pace, onCapture?: (spec, ctx) => Promise<void>, onStep?: (ctx) => void | Promise<void>, applyVariant?: boolean }`.
+`onStep` gets `{ index, stepId, title?, body?, at }` for every step the run reaches, with the translated `say`
+and `at` the wall-clock ms its card appeared (when `step()` answered, less the step's `pace.beforeAction`).
 It adds the runtime as an init script on the page's context if not already
 added (track with a WeakSet), sets the viewport for the variant (an unknown
 viewport name throws), navigates to `baseUrl + ir.route`, applies non-viewport
@@ -752,8 +755,10 @@ its timeout runs out. Without this a run that is merely faster (`check` takes no
 screenshots and glides no cursor, so it is) disagrees with a slower one on the
 same journey.
 
-`fixtures.ts`: `applyFixture(name, config, ctx)` runs `command` and polls
-`ready` (default `app.url`) until 200 or `timeout`, returns a stop function;
+`fixtures.ts`: `applyFixture(name, config, ctx)` runs `command`: with `ready`
+as a server, polling `ready` until it answers any status below 500 (redirects
+not followed) within `app.timeout`, stopped after the run; without `ready` to
+completion, failing unless it exits 0 within `app.timeout`. Returns a stop function;
 `routeFromHAR(har, { url: harUrl, notFound })` on the context; `storageState`
 is applied once per context: cookies with `addCookies`, local storage by an
 init script that runs on the first document of each origin per tab only; `setup` returns params merged under
@@ -774,7 +779,10 @@ registers, at import time, one `test` per journey and variant named
 `fullyParallel: true`, `use.trace: 'retain-on-failure'`,
 `use.screenshot: 'only-on-failure'`, `retries` 1 under `CI` else 0, and
 reporters `github` under `CI` (else `list`) plus `html` to `<out>/.test-report`
-with `open: 'never'`.
+with `open: 'never'`. Config `test` then overrides `retries`, `workers`,
+`fullyParallel`, `timeout`, `maxFailures`, `forbidOnly` and `expect`, and its
+`use` is merged over the `use` defaults; other keys are ignored. Playwright CLI
+flags still win over both.
 
 `capture.ts`: `captureStep(page, spec, ctx)` returns a PNG buffer of the
 full viewport, or clipped to the bounding box of the target or the given path
@@ -850,8 +858,8 @@ or cross.
   `tour.webm` when `--video` or any capture has `video`, converts to `mp4`
   and `gif` when ffmpeg exists (formats from config, default webm and mp4),
   writes `storyboard.png`, `manifest.json`, `index.md`, `index.html`, and with
-  a video `tour.vtt`: one cue per capture with a `say` title or body, from the
-  capture's time since the video started to the next capture (the last to the
+  a video `tour.vtt`: one cue per step with a `say` title or body, from the
+  `onStep` time since the video started to the next step (the last to the
   end of the video). When a configured `mp4` or `gif` needs ffmpeg and it is
   missing, one warning on stderr. A screenshot that fails with the transient
   `Unable to capture screenshot` protocol error is retried twice, 100 ms

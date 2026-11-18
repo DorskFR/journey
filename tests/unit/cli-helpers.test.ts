@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { placementOf, presenterOf, selectJourneys, wantsVideo } from '../../src/cli/book.js';
+import { placementOf, presenterOf, wantsVideo } from '../../src/cli/book.js';
 import { healthCounts, journeyOk, reportOk, targetHealth } from '../../src/cli/check.js';
 import {
 	envVars,
@@ -8,6 +8,8 @@ import {
 	type LoadedConfig,
 	matchesFilter,
 	parseVariantFilter,
+	selectById,
+	testSettings,
 	variantKey,
 	variantLabel,
 	variantMatrix,
@@ -180,13 +182,13 @@ test('book records video when asked or when any step captures video', () => {
 	expect(wantsVideo(ir([{}, { capture: { name: 'tour', video: true } }]), false)).toBe(true);
 });
 
-test('book selects journeys in the order asked and names a missing one', () => {
+test('book selects journeys like check and lists the valid ids for a missing one', () => {
 	const entry = (id: string) => ({ ir: ir([], { id }) }) as LoadedJourney;
 	const all = [entry('a'), entry('b'), entry('c')];
-	expect(selectJourneys(all, [])).toBe(all);
-	expect(selectJourneys(all, ['c', 'a']).map((e) => e.ir.id)).toEqual(['c', 'a']);
-	expect(() => selectJourneys(all, ['a', 'zz'])).toThrow(
-		'journey book: "zz" is not among the configured journeys',
+	expect(selectById(all, [], 'book')).toBe(all);
+	expect(selectById(all, ['c', 'a', 'c'], 'book').map((e) => e.ir.id)).toEqual(['a', 'c']);
+	expect(() => selectById(all, ['a', 'zz'], 'book')).toThrow(
+		'journey book: "zz" not among the configured journeys: a, b, c',
 	);
 });
 
@@ -379,4 +381,23 @@ test('storage state comes from the fixture, then the config, relative to the con
 	expect(storageStatePath('plain', config, '/app')).toBe(join('/app', 'auth/user.json'));
 	expect(storageStatePath(undefined, {}, '/app')).toBeUndefined();
 	expect(resolveFrom('/app', '../x')).toBe('/x');
+});
+
+test('the config test key keeps only Playwright options journey lets a team set', () => {
+	expect(testSettings({})).toEqual({ options: {}, use: {} });
+	const config = {
+		test: {
+			retries: 2,
+			workers: '50%',
+			fullyParallel: false,
+			expect: { timeout: 2000 },
+			use: { trace: 'on', locale: 'ja-JP' },
+			testDir: '/elsewhere',
+			outputDir: '/elsewhere',
+		},
+	} as Config;
+	expect(testSettings(config)).toEqual({
+		options: { retries: 2, workers: '50%', fullyParallel: false, expect: { timeout: 2000 } },
+		use: { trace: 'on', locale: 'ja-JP' },
+	});
 });

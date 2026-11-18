@@ -1,11 +1,19 @@
-import { createServer as createHttpServer } from 'node:http';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { createServer as createHttpServer, type Server } from 'node:http';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { withAppBrowser } from '../../src/cli/app.js';
 import { bookRoot, captureFile, variantDir } from '../../src/cli/book.js';
 import { type LoadedConfig, outDir } from '../../src/cli/config.js';
-import { answers, OutputTail, startCommand } from '../../src/playwright/fixtures.js';
+import {
+	answers,
+	applyFixture,
+	type FixtureContext,
+	OutputTail,
+	startCommand,
+} from '../../src/playwright/fixtures.js';
 
 function freePort(): Promise<number> {
 	return new Promise((done, fail) => {
@@ -99,7 +107,7 @@ test('a command that never answers reports the tail of its output', async () => 
 		(e: unknown) => e as Error,
 	);
 	expect(Date.now() - started).toBeLessThan(10000);
-	expect(error?.message).toMatch(/did not answer 200 within 1500 ms/);
+	expect(error?.message).toMatch(/did not answer below 500 within 1500 ms/);
 	expect(error?.message).toContain('line 100');
 	expect(error?.message).toContain('line 61');
 	expect(error?.message).not.toContain('line 60\n');
@@ -150,5 +158,91 @@ test('book never writes where journey test keeps visual baselines', () => {
 				}
 			}
 		}
+	}
+});
+
+async function statusServer(status: number): Promise<{ url: string; server: Server }> {
+	const server = createHttpServer((_q, res) => {
+		res.writeHead(status, status < 400 && status >= 300 ? { location: '/login' } : {});
+		res.end();
+	});
+	await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+	const address = server.address();
+	const port = typeof address === 'object' && address ? address.port : 0;
+	return { url: `http://127.0.0.1:${port}/`, server };
+}
+
+test('a ready URL answering any status below 500 is up', async () => {
+	for (const [status, up] of [
+		[200, true],
+		[302, true],
+		[401, true],
+		[404, true],
+		[500, false],
+		[503, false],
+	] as const) {
+		const { url, server } = await statusServer(status);
+		try {
+			expect(await answers(url), String(status)).toBe(up);
+		} finally {
+			await new Promise((done) => server.close(done));
+		}
+	}
+});
+
+test('a server whose ready URL answers 404 starts', async () => {
+	const { url, server } = await statusServer(404);
+	try {
+		const stop = await startCommand('exec sleep 30', {
+			cwd: process.cwd(),
+			ready: url,
+			timeout: 3000,
+		});
+		await stop();
+	} finally {
+		await new Promise((done) => server.close(done));
+	}
+});
+
+function fixtureContext(configDir: string): FixtureContext {
+	return { baseUrl: 'http://127.0.0.1:9/', configDir } as FixtureContext;
+}
+
+test('a fixture command without ready runs to completion before the journey', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'journey-fixture-'));
+	try {
+		const config = {
+			app: { url: 'http://127.0.0.1:9/', timeout: 5000 },
+			fixtures: { seed: { command: 'sleep 0.3 && touch seeded' } },
+		};
+		const applied = await applyFixture('seed', config, fixtureContext(dir));
+		expect(existsSync(join(dir, 'seeded'))).toBe(true);
+		await applied.stop();
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('a fixture command without ready must exit 0, and reports its output', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'journey-fixture-'));
+	try {
+		const failing = {
+			app: { url: 'http://127.0.0.1:9/', timeout: 5000 },
+			fixtures: { seed: { command: 'echo "seed: no database" >&2; exit 2' } },
+		};
+		await expect(applyFixture('seed', failing, fixtureContext(dir))).rejects.toThrow(
+			/"echo .*" exited with code 2\nlast output of .*\nseed: no database/,
+		);
+		const stuck = {
+			app: { url: 'http://127.0.0.1:9/', timeout: 800 },
+			fixtures: { seed: { command: 'echo seeding; exec sleep 30' } },
+		};
+		const started = Date.now();
+		await expect(applyFixture('seed', stuck, fixtureContext(dir))).rejects.toThrow(
+			/did not exit within 800 ms\nlast output of .*\nseeding/,
+		);
+		expect(Date.now() - started).toBeLessThan(5000);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
 	}
 });

@@ -1,12 +1,13 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
-import { loadConfig, outDir, resolveFrom } from '../cli/config.js';
+import { loadConfig, outDir, resolveFrom, testSettings } from '../cli/config.js';
 
 const loaded = await loadConfig();
 const app = loaded.config.app;
 const out = outDir(loaded);
 const slowMo = Number(process.env.JOURNEY_SLOW_MO);
+const test = testSettings(loaded.config);
 
 export default defineConfig({
 	testDir: dirname(fileURLToPath(import.meta.url)),
@@ -16,6 +17,7 @@ export default defineConfig({
 	outputDir: join(out, '.test-results'),
 	fullyParallel: true,
 	retries: process.env.CI ? 1 : 0,
+	...test.options,
 	reporter: [
 		[process.env.CI ? 'github' : 'list'],
 		['html', { outputFolder: join(out, '.test-report'), open: 'never' }],
@@ -24,7 +26,10 @@ export default defineConfig({
 		browserName: 'chromium',
 		trace: 'retain-on-failure',
 		screenshot: 'only-on-failure',
-		...(Number.isFinite(slowMo) && slowMo > 0 ? { launchOptions: { slowMo } } : {}),
+		...test.use,
+		...(Number.isFinite(slowMo) && slowMo > 0
+			? { launchOptions: { ...(test.use.launchOptions as object | undefined), slowMo } }
+			: {}),
 	},
 	webServer: app?.start
 		? {

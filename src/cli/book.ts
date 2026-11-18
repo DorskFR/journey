@@ -3,21 +3,25 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Browser } from '@playwright/test';
 import type { Capture, IR } from '../core/types.js';
 import { captureStep, startVideo } from '../playwright/capture.js';
-import { type CaptureContext, errorLine } from '../playwright/driver.js';
+import { type CaptureContext, errorLine, type StepContext } from '../playwright/driver.js';
 import { failureMessage, runConfigured } from '../playwright/index.js';
 import { resolveText } from '../runtime/text.js';
 import { withAppBrowser } from './app.js';
 import {
+	checkVariantFilter,
 	type LoadedConfig,
 	loadConfig,
+	matchesFilter,
 	outDir,
+	parseVariantFilter,
+	selectById,
 	variantKey,
 	variantLabel,
 	variantMatrix,
 	viewports,
 } from './config.js';
-import { HARNESS_COMPILE, type LoadedJourney, type LoadedJourneys, loadJourneys } from './load.js';
-import { type Argv, flagString, launchOptions, REPEAT_SEPARATOR } from './main.js';
+import { HARNESS_COMPILE, type LoadedJourneys, loadJourneys } from './load.js';
+import { type Argv, flagString, launchOptions } from './main.js';
 import { type CaptionMark, hasFfmpeg, renderVtt, storyboard, toGif, toMp4 } from './media.js';
 import {
 	type Manifest,
@@ -35,60 +39,6 @@ export type Placement = 'anchored' | 'banner';
 export const DEFAULT_FORMATS: VideoFormat[] = ['webm', 'mp4'];
 const PRESENTERS: Presenter[] = ['doc', 'spot', 'guide', 'none'];
 const PLACEMENTS: Placement[] = ['anchored', 'banner'];
-
-export type VariantFilter = Record<string, string[]>;
-
-export function parseVariantFilter(value: string | undefined): VariantFilter {
-	const out: VariantFilter = {};
-	for (const part of (value ?? '').split(REPEAT_SEPARATOR)) {
-		if (!part) continue;
-		const eq = part.indexOf('=');
-		if (eq <= 0) throw new Error(`journey book: --variant expects dim=value, got "${part}"`);
-		const dim = part.slice(0, eq);
-		const value = part.slice(eq + 1);
-		const values = out[dim] ?? [];
-		if (!values.includes(value)) values.push(value);
-		out[dim] = values;
-	}
-	return out;
-}
-
-export function matchesFilter(variant: Record<string, string>, filter: VariantFilter): boolean {
-	return Object.entries(filter).every(([dim, values]) => values.includes(variant[dim] ?? ''));
-}
-
-export function checkVariantFilter(
-	filter: VariantFilter,
-	matrices: Array<Array<Record<string, string>>>,
-): void {
-	const known = new Map<string, Set<string>>();
-	for (const variant of matrices.flat()) {
-		for (const [dim, value] of Object.entries(variant)) {
-			const values = known.get(dim) ?? new Set<string>();
-			known.set(dim, values.add(value));
-		}
-	}
-	for (const [dim, values] of Object.entries(filter)) {
-		const valid = known.get(dim);
-		if (!valid) {
-			throw new Error(
-				`journey book: unknown variant dim "${dim}", expected one of: ${[...known.keys()].join(', ')}`,
-			);
-		}
-		const unknown = values.filter((value) => !valid.has(value));
-		if (unknown.length) {
-			throw new Error(
-				`journey book: unknown ${dim} ${unknown.map((v) => `"${v}"`).join(', ')}, expected one of: ${[...valid].join(', ')}`,
-			);
-		}
-	}
-	if (!matrices.flat().some((variant) => matchesFilter(variant, filter))) {
-		const asked = Object.entries(filter)
-			.map(([dim, values]) => `${dim}=${values.join('|')}`)
-			.join(' ');
-		throw new Error(`journey book: no variant of the selected journeys matches --variant ${asked}`);
-	}
-}
 
 export function readManifest(dir: string): Manifest | null {
 	try {
@@ -157,15 +107,6 @@ export function variantDir(out: string, id: string, key: string): string {
 	return dir;
 }
 
-export function selectJourneys(journeys: LoadedJourney[], ids: string[]): LoadedJourney[] {
-	if (!ids.length) return journeys;
-	return ids.map((id) => {
-		const found = journeys.find((entry) => entry.ir.id === id);
-		if (!found) throw new Error(`journey book: "${id}" is not among the configured journeys`);
-		return found;
-	});
-}
-
 export function convertVideo(
 	dir: string,
 	formats: VideoFormat[],
@@ -227,8 +168,10 @@ async function bookVariant(
 			stopVideo = await startVideo(page, join(dir, 'tour.webm'), size);
 			videoStart = Date.now();
 		}
+		const onStep = (ctx: StepContext): void => {
+			if (stopVideo) marks.push({ at: ctx.at - videoStart, title: ctx.title, body: ctx.body });
+		};
 		const onCapture = async (spec: Capture, ctx: CaptureContext): Promise<void> => {
-			if (stopVideo) marks.push({ at: Date.now() - videoStart, title: ctx.title, body: ctx.body });
 			const file = captureFile(captures.length, spec.name);
 			writeFileSync(join(dir, file), await captureStep(page, spec, ctx));
 			files.push(join(dir, file));
@@ -239,6 +182,7 @@ async function bookVariant(
 			placement: opts.placement,
 			mask: true,
 			onCapture,
+			onStep,
 		});
 		ok = result.ok;
 		if (!ok) error = failureMessage(result).replace(/\n/g, '; ');
@@ -285,14 +229,13 @@ export async function runBook(argv: Argv): Promise<number> {
 		for (const line of errors) console.error(line);
 		return 1;
 	}
-	const selected = selectJourneys(journeys, argv.positional);
-	const filter = parseVariantFilter(flagString(argv, 'variant'));
-	if (Object.keys(filter).length) {
-		checkVariantFilter(
-			filter,
-			selected.map((entry) => variantMatrix(loaded.config, entry.ir)),
-		);
-	}
+	const selected = selectById(journeys, argv.positional, 'book');
+	const filter = parseVariantFilter(flagString(argv, 'variant'), 'book');
+	checkVariantFilter(
+		filter,
+		selected.map((entry) => variantMatrix(loaded.config, entry.ir)),
+		'book',
+	);
 	const sizes = viewports(loaded.config);
 	for (const entry of selected) {
 		for (const variant of variantMatrix(loaded.config, entry.ir)) {

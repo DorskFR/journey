@@ -129,6 +129,12 @@ falls back to Node type stripping: relative imports need their `.ts`
 extension, and enums, namespaces, parameter properties and `tsconfig` paths
 are not supported.
 
+`app.start` and a fixture `command` with a `ready` URL are servers: the run
+waits until that URL answers with any status below 500, so a login redirect or
+a 404 counts as up. A fixture `command` without `ready` is a setup script
+(seed a database, reset a mock): it runs before the journey and must exit 0
+within `app.timeout`.
+
 `journey record` reads the config when there is one: the url defaults to
 `app.url` (a bare path such as `/settings` is resolved against it), `app.start`
 is started when the app does not answer, the journey lands in the directory of
@@ -170,8 +176,8 @@ disk.
 
 Each booked variant gets `index.md` and `index.html`, a standalone UTF-8 page
 with only relative links, so it opens straight from disk. With a video, `book`
-also writes `tour.vtt`, a WebVTT caption track with each captured step's `say`
-title and body, shown from that capture until the next: the page plays the
+also writes `tour.vtt`, a WebVTT caption track with each step's `say` title
+and body, shown from when the step's card appears until the next step: the page plays the
 video with it, and a `spot` or `none` video keeps its text toggleable and
 translatable. The storyboard draws every capture at its own aspect ratio, so a
 `crop: 'target'` capture is letterboxed instead of stretched. Without ffmpeg,
@@ -538,8 +544,17 @@ npx journey test --shard 1/4 --workers 4 --grep create-note --reporter dot
 
 A failed test keeps its trace and screenshot in `<out>/.test-results/`, and
 an html report is written to `<out>/.test-report/`. Under `CI` a failure is
-retried once. Flags such as `--workers`, `--retries`, `--trace` and
-`--reporter` override these defaults.
+retried once. A `test` key in the config sets the team's defaults for
+`retries`, `workers`, `fullyParallel`, `timeout`, `maxFailures`,
+`forbidOnly`, `expect` and `use` (`trace`, `screenshot`, `video`, any other
+Playwright `use` option):
+
+```ts
+export default defineConfig({ test: { retries: 2, workers: '50%', use: { trace: 'on-first-retry' } } });
+```
+
+Flags such as `--workers`, `--retries`, `--trace` and `--reporter` override
+these defaults.
 
 `journey check` takes journey ids and `--variant dim=value` like `book`, and
 `--json` prints one report on stdout instead of a line per run:

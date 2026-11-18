@@ -75,6 +75,7 @@ export interface Step {
 	qaOnly?: boolean;
 	presenter?: PresenterName;
 	pace?: Pace;
+	test?: TestConfig;
 }
 
 export interface Journey {
@@ -119,6 +120,43 @@ export interface CompileOptions {
 	public?: boolean;
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: Playwright types response JSON as any.
+type Json = any;
+
+export interface FixtureRequestOptions {
+	data?: unknown;
+	form?: Record<string, string | number | boolean>;
+	headers?: Record<string, string>;
+	params?: Record<string, string | number | boolean> | string;
+	method?: string;
+	timeout?: number;
+	failOnStatusCode?: boolean;
+	ignoreHTTPSErrors?: boolean;
+	maxRedirects?: number;
+	maxRetries?: number;
+}
+
+export interface FixtureResponse<T = Json> {
+	ok(): boolean;
+	status(): number;
+	statusText(): string;
+	url(): string;
+	headers(): Record<string, string>;
+	json(): Promise<T>;
+	text(): Promise<string>;
+	dispose(): Promise<void>;
+}
+
+export interface FixtureRequest {
+	fetch<T = Json>(url: string, options?: FixtureRequestOptions): Promise<FixtureResponse<T>>;
+	get<T = Json>(url: string, options?: FixtureRequestOptions): Promise<FixtureResponse<T>>;
+	head<T = Json>(url: string, options?: FixtureRequestOptions): Promise<FixtureResponse<T>>;
+	post<T = Json>(url: string, options?: FixtureRequestOptions): Promise<FixtureResponse<T>>;
+	put<T = Json>(url: string, options?: FixtureRequestOptions): Promise<FixtureResponse<T>>;
+	patch<T = Json>(url: string, options?: FixtureRequestOptions): Promise<FixtureResponse<T>>;
+	delete<T = Json>(url: string, options?: FixtureRequestOptions): Promise<FixtureResponse<T>>;
+}
+
 export interface Fixture {
 	command?: string;
 	cwd?: string;
@@ -129,9 +167,31 @@ export interface Fixture {
 	storageState?: string;
 	setup?: (ctx: {
 		baseUrl: string;
-		request: import('@playwright/test').APIRequestContext;
+		request: FixtureRequest;
 	}) => Promise<Record<string, string> | undefined>;
 	params?: Record<string, string>;
+}
+
+export interface TestConfig {
+	retries?: number;
+	workers?: number | string;
+	fullyParallel?: boolean;
+	timeout?: number;
+	maxFailures?: number;
+	forbidOnly?: boolean;
+	expect?: { timeout?: number };
+	use?: {
+		trace?:
+			| 'on'
+			| 'off'
+			| 'retain-on-failure'
+			| 'on-first-retry'
+			| 'on-all-retries'
+			| 'retain-on-first-failure';
+		screenshot?: 'on' | 'off' | 'only-on-failure';
+		video?: 'on' | 'off' | 'retain-on-failure' | 'on-first-retry';
+		[option: string]: unknown;
+	};
 }
 
 export interface Config {
@@ -163,4 +223,5 @@ export interface Config {
 	placement?: 'anchored' | 'banner';
 	video?: { size?: { width: number; height: number }; formats?: Array<'webm' | 'mp4' | 'gif'> };
 	pace?: Pace;
+	test?: TestConfig;
 }

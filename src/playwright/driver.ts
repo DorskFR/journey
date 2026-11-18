@@ -24,6 +24,14 @@ export interface CaptureContext {
 	rect: Rect | null;
 }
 
+export interface StepContext {
+	index: number;
+	stepId: string;
+	title?: string;
+	body?: string;
+	at: number;
+}
+
 export interface RunOptions {
 	baseUrl: string;
 	params?: Record<string, string>;
@@ -35,6 +43,7 @@ export interface RunOptions {
 	masks?: string[];
 	pace?: Pace;
 	onCapture?: (spec: Capture, ctx: CaptureContext) => Promise<void>;
+	onStep?: (ctx: StepContext) => void | Promise<void>;
 	applyVariant?: boolean;
 }
 
@@ -223,6 +232,25 @@ export async function captureContext(
 	);
 }
 
+async function stepContext(
+	page: Page,
+	ir: IR,
+	index: number,
+	stepId: string,
+	pace: Pace | undefined,
+): Promise<StepContext> {
+	const step = ir.steps[index];
+	const at = Date.now() - (step?.pace?.beforeAction ?? pace?.beforeAction ?? 0);
+	const say = await page.evaluate((s) => {
+		const journey = window.__journey as Api;
+		return {
+			title: s?.title === undefined ? undefined : journey.translate(s.title),
+			body: s?.body === undefined ? undefined : journey.translate(s.body),
+		};
+	}, step?.say);
+	return { index, stepId, ...say, at };
+}
+
 export async function runJourney(page: Page, ir: IR, opts: RunOptions): Promise<RunResult> {
 	await injectRuntime(page.context());
 	const variant = { viewport: 'desktop', ...opts.variant };
@@ -303,6 +331,7 @@ async function drive(
 			await reload();
 			continue;
 		}
+		if (opts.onStep) await opts.onStep(await stepContext(page, ir, r.index, r.stepId, opts.pace));
 		const timeout = ir.steps[r.index]?.timeout ?? 10000;
 		let hovered: Rect | null = null;
 		if (r.action && r.marker) {
