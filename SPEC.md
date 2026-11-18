@@ -390,7 +390,7 @@ Per step:
    hidden first. The human and stepped actors ignore `step.presenter` and
    `step.pace`: the presenter is the only way through the run for a person, so
    a step may not take it away or stall them.
-6. Apply masks (section 5.3), wait `step.pace.beforeAction ?? pace.beforeAction`,
+6. Apply masks (section 5.3; they stay live until the run ends), wait `step.pace.beforeAction ?? pace.beforeAction`,
    move the cursor to the element if the presenter has one. `moveCursor`
    resolves on `transitionend`, on `transitioncancel`, or on a timer just past
    the transition it asked for: a transition that never starts fires neither
@@ -489,8 +489,15 @@ Colors: accent `#ffd166`, text `#111`, card background `#fff`, dim
 
 A stylesheet rule in the document head: `[data-journey-mask]{filter:blur(8px)!important}`.
 In book mode (`mask: true` in deps) the engine resolves `journey.mask` plus
-config masks at every step and sets `data-journey-mask` on the matches. The
-attribute is removed on `journey:done` for elements the engine set it on.
+config masks with the step's params and sets `data-journey-mask` on the
+matches, before the action and again before `step:pass`. A `mask: true` fill
+run by any actor but the human one masks its target before the value is
+typed, for the rest of the run, and `step:acted` reports its value as `***`.
+From the first mask on, a MutationObserver re-applies every mask whenever the
+DOM changes; its callbacks run before the next paint, so content the action
+inserts, re-renders or strips of the attribute is masked in every screenshot
+and video frame. Outside book mode the attribute is removed when the run ends;
+in book mode it stays, because the video records until the page closes.
 
 ### 5.4 Progress
 
@@ -833,6 +840,10 @@ Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
   `settings.html` and back, captures are reported in order, a journey with
   a wrong expectation fails with the step id, masks are applied in book mode
   (the masked paragraph has the attribute).
+- `mask.spec.ts`: content a click inserts and a node re-rendered without the
+  attribute are masked in their first frame and at capture time; a masked
+  fill's field is masked when its value is typed, still holds the real value,
+  and stays masked after being replaced.
 - `editor.spec.ts`: mount with editor, start recording, perform the
   create-note flow with Playwright clicks and typing, stop; the draft has the
   expected steps with `stable` targets and correct actions; suggestions

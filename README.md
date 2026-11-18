@@ -267,6 +267,15 @@ would repeat narration already on screen:
 { id: 'key', target: 'settings/api-key', do: { kind: 'hover' }, presenter: 'none' }
 ```
 
+### Secrets in captures
+
+`mask` on a journey or in the config lists targets `book` blurs. A `mask: true`
+fill, which `journey record` writes for passwords and secret-looking fields,
+blurs its field before the value is typed, in `book` and in `journey test`
+visual snapshots alike. Masks follow the page: what a step reveals or
+re-renders is blurred before it is ever drawn, in screenshots and in the video.
+The value still reaches the field, and Playwright traces still carry it.
+
 ## How long each step is held
 
 `pace` holds the run either side of the action: `beforeAction` after the target

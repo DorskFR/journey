@@ -178,6 +178,14 @@ function currentUrl(pattern: string): string {
 	return pattern.includes('#') ? location.pathname + location.hash : location.pathname;
 }
 
+function redacted(step: IRStep, action: Interaction): Interaction {
+	return isMaskedFill(step) && action.kind === 'fill' ? { ...action, value: '***' } : action;
+}
+
+function isMaskedFill(step: IRStep): boolean {
+	return step.do.kind === 'fill' && step.do.mask === true;
+}
+
 function elementValue(el: Element): string {
 	return (el as HTMLInputElement).value ?? '';
 }
@@ -394,8 +402,17 @@ export class Engine {
 	}
 
 	private applyMasks(params: Params): void {
-		if (!this.deps.mask) return;
-		this.masker.apply([...(this.ir.mask ?? []), ...(this.deps.masks ?? [])], params);
+		if (this.deps.mask) {
+			this.masker.apply([...(this.ir.mask ?? []), ...(this.deps.masks ?? [])], params);
+		} else {
+			this.masker.refresh();
+		}
+	}
+
+	private keepMasked(step: IRStep, params: Params, el: Element | null): void {
+		if (this.deps.actor.human || step.target === undefined) return;
+		if (!isMaskedFill(step)) return;
+		this.masker.keep(step.target, params, el);
 	}
 
 	private async resolveTarget(step: IRStep, params: Params): Promise<Element | null> {
@@ -450,6 +467,12 @@ export class Engine {
 		let navigated = resume.navigated === true;
 		let lastAction: Interaction['kind'] | null = null;
 		try {
+			for (const step of steps.slice(0, from)) {
+				if (!isMaskedFill(step)) continue;
+				try {
+					this.keepMasked(step, this.stepParams(step), null);
+				} catch {}
+			}
 			for (let i = from; i < steps.length; i++) {
 				const step = steps[i] as IRStep;
 				this.index = i;
@@ -510,24 +533,27 @@ export class Engine {
 						const el = await this.resolveTarget(step, params);
 						this.emit('step:resolved', { ...stepData, target: step.target ?? null });
 						acting.show(step, el, showCtx);
+						this.keepMasked(step, params, el);
 						this.applyMasks(params);
 						await sleep(paceOf(step, 'beforeAction'), this.signal);
 						if (el && acting.moveCursor) await this.race(acting.moveCursor(el));
 						await this.race(actor.perform(step, el, action, ctx));
 						if (el && (action.kind === 'click' || action.kind === 'dblclick')) acting.ripple?.(el);
-						this.emit('step:acted', { ...stepData, action });
+						this.emit('step:acted', { ...stepData, action: redacted(step, action) });
 						progress?.save(i, true);
 					} else {
 						acted = false;
 						const found =
 							step.target === undefined ? null : (resolveOne(step.target, params).el ?? null);
 						acting.show(step, found, { ...showCtx, next: null });
+						this.keepMasked(step, params, found);
 						this.applyMasks(params);
 						if (actor.resume) await this.race(actor.resume(step, ctx));
 					}
 					await this.waitExpectations(step, params);
 					await this.race(Promise.resolve(acting.settle(step)));
 					await sleep(paceOf(step, 'afterSettle'), this.signal);
+					this.applyMasks(params);
 					result.completed += 1;
 					lastAction = step.do.kind;
 					navigated = false;
@@ -563,7 +589,7 @@ export class Engine {
 				progress?.clear();
 			}
 		} finally {
-			this.masker.clear();
+			if (!this.deps.mask) this.masker.clear();
 			visible.hide();
 			this.running = false;
 		}
