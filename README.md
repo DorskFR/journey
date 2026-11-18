@@ -419,6 +419,21 @@ move the variables.
 }
 ```
 
+## In CI
+
+`journey test` runs one Playwright test per journey and variant, spread
+across workers. Every argument other than `--config`, `--headed` and
+`--slow-mo` goes to `playwright test` as written:
+
+```sh
+npx journey test --shard 1/4 --workers 4 --grep create-note --reporter dot
+```
+
+A failed test keeps its trace and screenshot in `<out>/.test-results/`, and
+an html report is written to `<out>/.test-report/`. Under `CI` a failure is
+retried once. Flags such as `--workers`, `--retries`, `--trace` and
+`--reporter` override these defaults.
+
 ## Existing Playwright suite
 
 ```ts

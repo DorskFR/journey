@@ -688,7 +688,11 @@ registers, at import time, one `test` per journey and variant named
 `expect(buffer).toMatchSnapshot(['<id>', '<variant>', '<NN>-<name>.png'])`.
 `journeys.config.ts` sets `snapshotDir` to `config.out` and
 `snapshotPathTemplate: '{snapshotDir}/{arg}{ext}'`, `webServer` from
-`config.app` when `start` is set, `outputDir` to `<out>/.test-results`.
+`config.app` when `start` is set, `outputDir` to `<out>/.test-results`,
+`fullyParallel: true`, `use.trace: 'retain-on-failure'`,
+`use.screenshot: 'only-on-failure'`, `retries` 1 under `CI` else 0, and
+reporters `github` under `CI` (else `list`) plus `html` to `<out>/.test-report`
+with `open: 'never'`.
 
 `capture.ts`: `captureStep(page, spec, ctx)` returns a PNG buffer of the
 full viewport, or clipped to the bounding box of the target or the given path
@@ -718,8 +722,11 @@ or cross.
 - Config `vars` are merged with the JSON object in the `JOURNEY_VARS`
   environment variable when set, so secrets never have to be written down.
 - `test [playwright args...]`: spawns `npx playwright test -c <dist>/playwright/journeys.config.js`
-  with `JOURNEY_CONFIG` set to the absolute config path, forwarding extra
-  args and the exit code.
+  with `JOURNEY_CONFIG` set to the absolute config path and passes back the
+  exit code. After `test`, journey consumes only `--config`, `--headed`,
+  `--slow-mo` and `--help`; every other argument (`--grep`, `-g`, `--shard`,
+  `--workers`, files...) is forwarded verbatim and in order, and everything
+  after `--` is forwarded untouched.
 - `record <url> [-o dir] [--har] [--no-har] [--storage-state]`: launches
   headed Chromium with the runtime and editor injected and `editor: true`.
   The export binding takes only `{ ir }` from the page's main frame; the CLI
