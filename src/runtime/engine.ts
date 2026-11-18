@@ -10,6 +10,7 @@ import type {
 } from '../core/types.js';
 import { Masker } from './mask.js';
 import { ambiguityHint, describeTarget, resolveAll, resolveOne } from './resolve.js';
+import { watchRoute } from './route.js';
 import {
 	currentLocale,
 	isParamRef,
@@ -113,6 +114,8 @@ export type EngineEvent =
 export type Listener = (data: Record<string, unknown>) => void;
 
 export const POLL_INTERVAL = 100;
+export const POLL_MAX_INTERVAL = 1000;
+const POLL_BACKOFF_AFTER = 1000;
 
 class AbortError extends Error {
 	constructor() {
@@ -154,15 +157,67 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	});
 }
 
+// Resolves after the next DOM mutation or route change, or after `ms` when neither happens.
+function watchChanges(): { next: (ms: number) => Promise<void>; stop: () => void } {
+	let wake: (() => void) | null = null;
+	const changed = (): void => wake?.();
+	const observer = typeof MutationObserver === 'function' ? new MutationObserver(changed) : null;
+	observer?.observe(document, {
+		subtree: true,
+		childList: true,
+		attributes: true,
+		characterData: true,
+	});
+	const unroute = typeof history === 'object' ? watchRoute(changed) : () => {};
+	return {
+		next: (ms) =>
+			new Promise<void>((resolve) => {
+				const timer = setTimeout(done, ms);
+				function done(): void {
+					clearTimeout(timer);
+					wake = null;
+					resolve();
+				}
+				wake = done;
+			}),
+		stop: () => {
+			observer?.disconnect();
+			unroute();
+		},
+	};
+}
+
+function splitQuery(pattern: string): { path: string; query: string | null } {
+	const hash = pattern.indexOf('#');
+	const mark = pattern.indexOf('?');
+	if (mark === -1 || (hash !== -1 && hash < mark)) return { path: pattern, query: null };
+	const end = hash === -1 ? pattern.length : hash;
+	return { path: pattern.slice(0, mark) + pattern.slice(end), query: pattern.slice(mark + 1, end) };
+}
+
+function withoutTrailingSlash(path: string): string {
+	const hash = path.indexOf('#');
+	const pathname = hash === -1 ? path : path.slice(0, hash);
+	const rest = hash === -1 ? '' : path.slice(hash);
+	return (pathname.length > 1 ? pathname.replace(/\/+$/, '') || '/' : pathname) + rest;
+}
+
+function queryHolds(query: string): boolean {
+	const have = new URLSearchParams(location.search);
+	return [...new URLSearchParams(query)].every(([key, value]) => have.getAll(key).includes(value));
+}
+
 export function matchesRoute(route: string): boolean {
-	const current = route.includes('#') ? location.pathname + location.hash : location.pathname;
-	return current === route;
+	return withoutTrailingSlash(currentPath(route)) === withoutTrailingSlash(route);
 }
 
 export function matchesUrl(pattern: string): boolean {
-	const current = pattern.includes('#') ? location.pathname + location.hash : location.pathname;
-	if (!pattern.includes('*')) return current === pattern;
-	const source = pattern
+	const { path, query } = splitQuery(pattern);
+	if (query !== null && !queryHolds(query)) return false;
+	const current = withoutTrailingSlash(currentPath(path));
+	const wanted = withoutTrailingSlash(path);
+	if (!wanted.includes('*')) return current === wanted;
+	const source = wanted
 		.split('**')
 		.map((part) =>
 			part
@@ -174,8 +229,13 @@ export function matchesUrl(pattern: string): boolean {
 	return new RegExp(`^${source}$`).test(current);
 }
 
-function currentUrl(pattern: string): string {
+function currentPath(pattern: string): string {
 	return pattern.includes('#') ? location.pathname + location.hash : location.pathname;
+}
+
+function currentUrl(pattern: string): string {
+	const search = splitQuery(pattern).query === null ? '' : location.search;
+	return location.pathname + search + (pattern.includes('#') ? location.hash : '');
 }
 
 function redacted(step: IRStep, action: Interaction): Interaction {
@@ -306,12 +366,23 @@ export class Engine {
 		timeout: number | null,
 	): Promise<T | undefined> {
 		const deadline = timeout === null ? Number.POSITIVE_INFINITY : performance.now() + timeout;
-		for (;;) {
-			if (this.aborted) throw new AbortError();
-			const value = await fn();
-			if (value !== undefined) return value;
-			if (performance.now() >= deadline) return undefined;
-			await sleep(POLL_INTERVAL, this.signal);
+		const started = performance.now();
+		const changes = watchChanges();
+		let interval = POLL_INTERVAL;
+		try {
+			for (;;) {
+				if (this.aborted) throw new AbortError();
+				const value = await fn();
+				if (value !== undefined) return value;
+				if (performance.now() >= deadline) return undefined;
+				await sleep(POLL_INTERVAL, this.signal);
+				if (performance.now() - started < POLL_BACKOFF_AFTER) continue;
+				interval = Math.min(interval * 2, POLL_MAX_INTERVAL);
+				const rest = Math.min(interval - POLL_INTERVAL, deadline - performance.now());
+				if (rest > 0) await this.race(changes.next(rest));
+			}
+		} finally {
+			changes.stop();
 		}
 	}
 
@@ -336,8 +407,8 @@ export class Engine {
 		params: Params,
 		deadline: number,
 	): Promise<string | null> {
-		const single = (target: Target, label: string) => {
-			const r = resolveOne(target, params);
+		const single = (target: Target, label: string, labelled = false) => {
+			const r = resolveOne(target, params, document, { labelled });
 			if (r.error === 'notfound') return { error: `${label} ${describeTarget(target)}: 0 matches` };
 			if (r.error === 'ambiguous') {
 				return { error: `${label} ${describeTarget(target)}: ${r.count} matches` };
@@ -364,7 +435,7 @@ export class Engine {
 		if ('value' in e) {
 			const [target, value] = e.value;
 			const expected = resolveParam(value, params);
-			const r = single(target, 'value');
+			const r = single(target, 'value', true);
 			if (r.error !== undefined) return r.error;
 			const actual = elementValue(r.el);
 			return actual === expected
@@ -373,7 +444,7 @@ export class Engine {
 		}
 		if ('checked' in e) {
 			const [target, expected] = e.checked;
-			const r = single(target, 'checked');
+			const r = single(target, 'checked', true);
 			if (r.error !== undefined) return r.error;
 			const actual = (r.el as HTMLInputElement).checked === true;
 			return actual === expected

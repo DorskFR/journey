@@ -117,7 +117,10 @@ test('a titled menuitem is named by its content, not its title', async ({ page }
 });
 
 test('title still names a menuitem with no content', async ({ page }) => {
-	await mount(page, '<div role="menu"><div role="menuitem" title="Close menu"></div></div>');
+	await mount(
+		page,
+		'<div role="menu"><div role="menuitem" title="Close menu" style="width:16px;height:16px"></div></div>',
+	);
 	expect(await count(page, { role: 'menuitem', name: 'Close menu' })).toBe(1);
 });
 

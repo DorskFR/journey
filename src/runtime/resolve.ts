@@ -149,9 +149,17 @@ export function accessibleName(el: Element): string {
 
 export function isVisible(el: Element): boolean {
 	const rect = el.getBoundingClientRect();
-	if (rect.width === 0 && rect.height === 0) return false;
+	if (rect.width <= 0 || rect.height <= 0) return false;
+	if (typeof el.checkVisibility === 'function')
+		return el.checkVisibility({ visibilityProperty: true });
 	const view = el.ownerDocument.defaultView ?? window;
 	return view.getComputedStyle(el).visibility !== 'hidden';
+}
+
+// Design systems hide the native control and draw its label instead.
+function labelVisible(el: Element): boolean {
+	const labels = (el as HTMLInputElement).labels;
+	return labels ? Array.from(labels).some(isVisible) : false;
 }
 
 function outermost(els: Element[]): Element[] {
@@ -223,9 +231,37 @@ function labelMatches(el: Element, label: string): boolean {
 	return labelsOf(el).includes(label);
 }
 
-function textMatches(el: Element, text: string): boolean {
-	if (collapse(el.textContent) !== text) return false;
-	return !Array.from(el.children).some((child) => collapse(child.textContent) === text);
+// An element whose text does not contain `text` has no descendant that matches.
+function textCandidates(scope: ParentNode, text: string): Element[] {
+	const out: Element[] = [];
+	const visit = (el: Element): void => {
+		const own = collapse(el.textContent);
+		if (!own.includes(text)) return;
+		const children = Array.from(el.children);
+		if (own === text && !children.some((child) => collapse(child.textContent) === text)) {
+			out.push(el);
+		}
+		for (const child of children) visit(child);
+	};
+	for (const child of Array.from(scope.children)) visit(child);
+	return out;
+}
+
+const ROLE_TAGS = new Map<string, string[]>();
+for (const [type, role] of Object.entries(INPUT_ROLES)) {
+	ROLE_TAGS.set(role, [...(ROLE_TAGS.get(role) ?? []), `input[type="${type}" i]`]);
+}
+for (const [tag, role] of Object.entries(TAG_ROLES)) {
+	ROLE_TAGS.set(role, [...(ROLE_TAGS.get(role) ?? []), tag]);
+}
+ROLE_TAGS.set('link', ['a[href]', 'area[href]']);
+ROLE_TAGS.set('textbox', [...(ROLE_TAGS.get('textbox') ?? []), 'input']);
+
+// Only the elements computedRole can give a role to, narrowed to `role` when given.
+function roleSelector(role: string | undefined): string {
+	const tags =
+		role === undefined ? [...new Set([...ROLE_TAGS.values()].flat())] : (ROLE_TAGS.get(role) ?? []);
+	return ['[role]', ...tags].join(',');
 }
 
 export function resolveLocator(locator: Locator, params: Params, root: ParentNode): Element[] {
@@ -250,7 +286,7 @@ export function resolveLocator(locator: Locator, params: Params, root: ParentNod
 	if (locator.role !== undefined || locator.name !== undefined) {
 		const name = locator.name === undefined ? undefined : collapse(locator.name);
 		narrow(
-			query('*').filter((el) => {
+			query(roleSelector(locator.role)).filter((el) => {
 				const role = computedRole(el);
 				if (role === null) return false;
 				if (locator.role !== undefined && role !== locator.role) return false;
@@ -260,18 +296,25 @@ export function resolveLocator(locator: Locator, params: Params, root: ParentNod
 	}
 	if (locator.text !== undefined) {
 		const text = collapse(locator.text);
-		narrow(query('*').filter((el) => textMatches(el, text)));
+		narrow(unique(scopes.flatMap((scope) => textCandidates(scope, text))));
 	}
 	return els ?? [];
+}
+
+export interface ResolveOptions {
+	/** Count a hidden form control as visible when one of its labels is. */
+	labelled?: boolean;
 }
 
 export function resolveAll(
 	target: Target,
 	params: Params = {},
 	root: ParentNode = document,
+	options: ResolveOptions = {},
 ): Element[] {
-	if (typeof target === 'string') return resolvePath(target, params, root).filter(isVisible);
-	const visible = resolveLocator(target, params, root).filter(isVisible);
+	const shown = options.labelled ? (el: Element) => isVisible(el) || labelVisible(el) : isVisible;
+	if (typeof target === 'string') return resolvePath(target, params, root).filter(shown);
+	const visible = resolveLocator(target, params, root).filter(shown);
 	if (target.nth === undefined) return visible;
 	const picked = visible[target.nth];
 	return picked === undefined ? [] : [picked];
@@ -281,8 +324,9 @@ export function resolveOne(
 	target: Target,
 	params: Params = {},
 	root: ParentNode = document,
+	options: ResolveOptions = {},
 ): ResolveResult {
-	const matches = resolveAll(target, params, root);
+	const matches = resolveAll(target, params, root, options);
 	if (matches.length === 1) return { el: matches[0] as Element };
 	if (matches.length === 0) return { error: 'notfound' };
 	return { error: 'ambiguous', count: matches.length };

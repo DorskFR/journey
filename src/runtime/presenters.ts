@@ -182,10 +182,12 @@ function cursorPresenter(overlay: Overlay): Pick<Presenter, 'moveCursor' | 'ripp
 
 const NEXT_KEYS = ['Enter', ' ', 'ArrowRight'];
 
-function editable(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) return false;
-	if (target.isContentEditable) return true;
-	return target.matches('input,textarea,select');
+// A key pressed on a page control belongs to that control.
+function takesNextKey(target: EventTarget | null, overlay: Overlay): boolean {
+	if (!(target instanceof Node)) return true;
+	return (
+		target === document.body || target === document.documentElement || overlay.host.contains(target)
+	);
 }
 
 const HOST_LAYER = 'dialog[open],[popover],[role="menu"],[role="listbox"]';
@@ -209,7 +211,7 @@ export function guidePresenter(overlay: Overlay, t: Localize = defaultLocalize):
 		detachKey();
 		onKey = (event) => {
 			if (!event.isTrusted || !next || !NEXT_KEYS.includes(event.key)) return;
-			if (editable(event.target) && !overlay.host.contains(event.target as Node)) return;
+			if (!takesNextKey(event.target, overlay)) return;
 			event.preventDefault();
 			next();
 		};

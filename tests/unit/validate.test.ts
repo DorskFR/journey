@@ -170,3 +170,32 @@ test('accepts ids with dots, dashes, underscores and digits', () => {
 	const j = { id: 'v1.2_create-note', steps: [{ id: '2fa_code.next', capture: 'Step-1.a' }] };
 	expect(validate(j)).toEqual({ ok: true, errors: [] });
 });
+
+test('routes and url patterns are paths, and a route carries no query string', () => {
+	const result = validate({
+		id: 'j',
+		autostart: { route: 'settings' },
+		steps: [
+			{ id: 'a', route: 'settings' },
+			{ id: 'b', route: '/settings?tab=api' },
+			{ id: 'c', route: '/#notes?x=1', expect: [{ url: 'notes' }] },
+			{ id: 'd', route: '/settings/', expect: [{ url: '/settings?tab=api' }, { url: '**/x' }] },
+		],
+	});
+	expect(result.errors).toEqual([
+		{
+			path: 'autostart.route',
+			message: 'expected a path starting with "/" or a "*" pattern, got "settings"',
+		},
+		{ path: 'steps[0].route', message: 'expected a path starting with "/", got "settings"' },
+		{
+			path: 'steps[1].route',
+			message:
+				'a route is matched without its query string; drop "?tab=api" and assert it with expect: [{ url: "/settings?tab=api" }]',
+		},
+		{
+			path: 'steps[2].expect[0].url',
+			message: 'expected a path starting with "/" or a "*" pattern, got "notes"',
+		},
+	]);
+});

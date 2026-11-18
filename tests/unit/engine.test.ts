@@ -5,6 +5,7 @@ import {
 	type ActorCtx,
 	Engine,
 	type EngineDeps,
+	matchesRoute,
 	matchesUrl,
 	type Presenter,
 	type ShowCtx,
@@ -670,4 +671,90 @@ test('a masked fill keeps its field masked for the run and clears the mask after
 	}).run();
 	expect(seen).toEqual(['', '']);
 	expect(pin.hasAttribute('data-journey-mask')).toBe(false);
+});
+
+test('an optional step in a guide is skipped when its target never shows up', async () => {
+	const log = newLog();
+	const result = await engineFor(
+		ir([
+			step('banner', { target: 'banner', do: { kind: 'click' }, optional: true }),
+			step('after'),
+		]),
+		log,
+		{ actor: actorLogging(log, { human: true }) },
+	).run();
+	expect(result).toEqual({ ok: true, completed: 1, failures: [] });
+	expect(log.lines).toContain('step:skip banner');
+	expect(log.lines).toContain('perform after none');
+});
+
+test('url patterns ignore a trailing slash and assert only the query params they list', () => {
+	dom.location.pathname = '/settings/';
+	dom.location.search = '?tab=api&journey=run';
+	expect(matchesUrl('/settings')).toBe(true);
+	expect(matchesUrl('/settings?tab=api')).toBe(true);
+	expect(matchesUrl('/settings/?tab=api')).toBe(true);
+	expect(matchesUrl('/settings?tab=keys')).toBe(false);
+	expect(matchesUrl('/*?tab=api')).toBe(true);
+	dom.location.hash = '#top';
+	expect(matchesUrl('/settings?tab=api#top')).toBe(true);
+	expect(matchesUrl('/settings#top?tab=keys')).toBe(false);
+	expect(matchesRoute('/settings')).toBe(true);
+	dom.location.pathname = '/';
+	expect(matchesRoute('/')).toBe(true);
+});
+
+test('a url expectation that fails names the query it saw', async () => {
+	dom.location.pathname = '/settings';
+	dom.location.search = '?tab=keys';
+	const result = await engineFor(
+		ir([step('s', { expect: [{ url: '/settings?tab=api' }], timeout: 50 })]),
+		newLog(),
+	).run();
+	expect(result.failures).toEqual([
+		{ stepId: 's', error: 'url /settings?tab=api: /settings?tab=keys' },
+	]);
+});
+
+test('checked and value read a hidden native input through its visible label', async () => {
+	const label = journeyEl(dom, 'agree-label', { tag: 'label' });
+	const box = journeyEl(dom, 'agree', { tag: 'input' });
+	box.setAttribute('type', 'checkbox');
+	box.hidden = true;
+	box.checked = true;
+	box.value = 'yes';
+	const expectations: Expectation[] = [{ checked: ['agree', true] }, { value: ['agree', 'yes'] }];
+	const unlabelled = await engineFor(
+		ir([step('s', { expect: expectations, timeout: 50 })]),
+		newLog(),
+	).run();
+	expect(unlabelled.failures).toEqual([{ stepId: 's', error: 'checked agree: 0 matches' }]);
+	(box as unknown as { labels: unknown[] }).labels = [label];
+	const labelled = await engineFor(
+		ir([step('s', { expect: expectations, timeout: 50 })]),
+		newLog(),
+	).run();
+	expect(labelled).toEqual({ ok: true, completed: 1, failures: [] });
+	const visible = await engineFor(
+		ir([step('s', { expect: [{ visible: 'agree' }], timeout: 50 })]),
+		newLog(),
+	).run();
+	expect(visible.ok).toBe(false);
+});
+
+test('a long wait for a target backs off instead of scanning the page every 100 ms', async () => {
+	let scans = 0;
+	const query = dom.document.querySelectorAll.bind(dom.document);
+	dom.document.querySelectorAll = (selector: string) => {
+		scans += 1;
+		return query(selector);
+	};
+	setTimeout(() => journeyEl(dom, 'late'), 2900);
+	const log = newLog();
+	const { value, elapsed } = await timed(
+		engineFor(ir([step('s', { target: 'late', do: { kind: 'click' }, timeout: 5000 })]), log).run(),
+	);
+	expect(value.ok).toBe(true);
+	expect(elapsed).toBeLessThan(4200);
+	expect(scans).toBeLessThan(20);
 });

@@ -295,8 +295,13 @@ Resolution (`resolveAll(target, params, root = document)`):
   `querySelectorAll`; `within` scopes the search to a resolved path; `nth`
   picks an index after all other filters.
 - Only visible elements count for targets and for `visible`, `text`, `value`,
-  `checked`, `enabled`, `disabled` expectations. Visible means a non-empty
-  bounding box and no ancestor with `display:none` or `visibility:hidden`.
+  `checked`, `enabled`, `disabled` expectations. Visible means a bounding box
+  with non-zero width and height, and `checkVisibility({ visibilityProperty:
+  true })` (no ancestor with `display:none`, `content-visibility:hidden` or
+  `visibility:hidden`); opacity and position off-screen do not matter. A
+  `checked` or `value` expectation also accepts a hidden form control when one
+  of its `<label>`s is visible, so a native checkbox a design system hides
+  behind its label can be asserted.
   `hidden` passes when zero visible matches. `count` counts visible matches.
 
 `resolveOne` returns `{ el }` for exactly one match, `{ error: 'notfound' }`
@@ -433,7 +438,7 @@ Per step:
    navigation, and a resumed step that forced one already fails on the next
    miss instead of navigating again. After navigation the engine continues
    from the same step (progress is persisted before navigating).
-4. Resolve the target with polling every 100 ms up to `timeout`, for every
+4. Resolve the target by polling (below) up to `timeout`, for every
    actor. The human and stepped actors first draw the step with no target
    and no Next, so Exit and Escape work while it is pending. `optional` steps
    skip on timeout; any other step fails the run, which clears progress so a
@@ -455,7 +460,7 @@ Per step:
    timeout fails the step.
 7. `actor.perform(step, el)`; the engine draws the click ripple when the actor
    reports completion.
-8. Wait for all expectations, polling every 100 ms up to `timeout`. A failing
+8. Wait for all expectations, polling up to `timeout`. A failing
    expectation produces an error string naming the expectation and the
    observed state, for example `visible notes/dialog: 0 matches`. Each probe
    call is raced against the time left: a probe that throws or has not
@@ -470,11 +475,23 @@ Events emitted via a small emitter and forwarded to `track`:
 `journey:start`, `step:start`, `step:resolved`, `step:acted`, `step:pass`,
 `step:fail`, `step:skip`, `journey:done`, `journey:abort`.
 
-Route matching: compare `location.pathname` to `route`; if `route` contains
-`#`, compare `pathname + hash`. Exact match only.
+Polling: every 100 ms for the first second, then the gap doubles up to 1 s.
+While it waits past the first second, a DOM mutation (`MutationObserver` on
+the document) or a route change ends the gap early, so a change is still seen
+within about 100 ms while a static page is scanned at most once a second.
 
-Expectation `url`: same comparison as route; when the string contains `*`
-convert to a regex where `*` is `[^/]*` and `**` is `.*`.
+Route matching: compare `location.pathname` to `route`; if `route` contains
+`#`, compare `pathname + hash`. A trailing `/` on the path is ignored on both
+sides; otherwise the match is exact. Validation requires a step `route` to
+start with `/` and to carry no query string (a `?` before any `#`); assert
+the query with a `url` expectation.
+
+Expectation `url` (and `autostart.route`): same comparison as route, and the
+string must start with `/` or `*`. When it contains `*` convert to a regex
+where `*` is `[^/]*` and `**` is `.*`. A query string before any `#`
+(`/settings?tab=api`) is not part of the path comparison: each listed
+parameter must be present in `location.search` with that value, and other
+parameters are allowed.
 
 `text` with `MsgRef` resolves through `translate(id, locale)`; if the hook
 is absent or returns undefined the id itself is used. `Record<Locale,string>`
@@ -565,7 +582,9 @@ bubble phase, after the page, and is ignored when the page called
 `preventDefault()`, when focus is inside an open `dialog`, a `[popover]`, a
 `[role=menu]` or `[role=listbox]` or on an `aria-expanded="true"` control
 outside the overlay, and on a step whose action is pressing Escape (its Exit
-button then shows no `Esc` hint). The spotlight scrolls
+button then shows no `Esc` hint). Enter, Space and ArrowRight press Next
+only when focus is in the overlay or on the page body; on a page control the
+key is left to that control. The spotlight scrolls
 the target into view (`scrollIntoView({ block: 'center' })`) before measuring.
 
 Presenter factories take the `t(key, vars)` helper built from `strings`
@@ -606,6 +625,9 @@ in book mode it stays, because the video records until the page closes.
 
 `sessionStorage['journey:progress'] = JSON.stringify({ id, version, index, mode, params, variant, acted, navigated })`.
 Written before navigation and after each step; removed on done or abort.
+Reads, writes and removes go to the storage adapter one at a time, in the
+order the runtime made them, so a slow async `remove` from a stopped run
+cannot land after the next run's first write.
 `params` never holds a secret: keys under `var.`, keys matching the
 sensitive-name rule (`pass`, `token`, `secret`, `otp`, `card`, `cvc`, `ssn`)
 and the params of `mask: true` fills are left out. A resumed run gets them

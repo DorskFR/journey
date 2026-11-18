@@ -206,6 +206,10 @@ export class FakeDocument {
 		this.activeElement = this.body;
 	}
 
+	get children(): FakeElement[] {
+		return [this.documentElement];
+	}
+
 	createElement(tag: string, attrs: Record<string, string> = {}): FakeElement {
 		const name = tag.toLowerCase();
 		if (name === 'input') return new FakeInput(this, name, attrs);

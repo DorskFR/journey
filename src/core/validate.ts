@@ -218,6 +218,8 @@ function checkExpectation(c: Collector, path: string, v: unknown): void {
 	}
 	switch (kind) {
 		case 'url':
+			checkUrlPattern(c, p, value);
+			return;
 		case 'event':
 			checkString(c, p, value);
 			return;
@@ -299,6 +301,28 @@ function checkPace(c: Collector, path: string, v: unknown): void {
 	}
 }
 
+function checkRoute(c: Collector, path: string, v: unknown): void {
+	if (!checkString(c, path, v) || typeof v !== 'string') return;
+	if (!v.startsWith('/')) {
+		c.add(path, `expected a path starting with "/", got ${JSON.stringify(v)}`);
+		return;
+	}
+	const query = /\?[^#]*/.exec(v.split('#')[0] ?? '');
+	if (query) {
+		c.add(
+			path,
+			`a route is matched without its query string; drop ${JSON.stringify(query[0])} and assert it with expect: [{ url: ${JSON.stringify(v)} }]`,
+		);
+	}
+}
+
+function checkUrlPattern(c: Collector, path: string, v: unknown): void {
+	if (!checkString(c, path, v) || typeof v !== 'string') return;
+	if (!v.startsWith('/') && !v.startsWith('*')) {
+		c.add(path, `expected a path starting with "/" or a "*" pattern, got ${JSON.stringify(v)}`);
+	}
+}
+
 function checkStep(c: Collector, path: string, v: unknown): void {
 	if (!isRecord(v)) {
 		c.add(path, `expected a step object, got ${describe(v)}`);
@@ -306,7 +330,7 @@ function checkStep(c: Collector, path: string, v: unknown): void {
 	}
 	checkKeys(c, path, v, STEP_KEYS);
 	checkId(c, `${path}.id`, v.id, 'step id');
-	if ('route' in v) checkString(c, `${path}.route`, v.route);
+	if ('route' in v) checkRoute(c, `${path}.route`, v.route);
 	if ('target' in v) checkTarget(c, `${path}.target`, v.target);
 	if ('params' in v) checkStringRecord(c, `${path}.params`, v.params, true);
 	if ('do' in v) checkInteraction(c, `${path}.do`, v.do);
@@ -393,7 +417,7 @@ export function validate(journey: unknown): ValidationResult {
 		if (!isRecord(journey.autostart)) c.add('autostart', 'expected { route, once? }');
 		else {
 			checkKeys(c, 'autostart', journey.autostart, new Set(['route', 'once']));
-			checkString(c, 'autostart.route', journey.autostart.route);
+			checkUrlPattern(c, 'autostart.route', journey.autostart.route);
 			if ('once' in journey.autostart && typeof journey.autostart.once !== 'boolean') {
 				c.add('autostart.once', 'expected a boolean');
 			}

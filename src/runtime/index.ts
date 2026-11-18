@@ -13,7 +13,7 @@ import {
 } from './engine.js';
 import { createOverlay, type Overlay, type Placement } from './overlay.js';
 import { docPresenter, guidePresenter, nonePresenter, spotPresenter } from './presenters.js';
-import { clearProgress, readProgress, storedParams, writeProgress } from './progress.js';
+import { progressStore, storedParams } from './progress.js';
 import {
 	accessibleName,
 	computedRole,
@@ -197,6 +197,7 @@ export function mount(input: MountOptions = {}): JourneyApi {
 	const options: MountOptions = { ...input };
 	const journeys = new Map<string, IR>();
 	const store = (): JourneyStorage => options.storage ?? defaultStorage;
+	const progress = progressStore(store);
 	const overlay = createOverlay();
 	let mounted = true;
 	let launcherShown = false;
@@ -275,7 +276,7 @@ export function mount(input: MountOptions = {}): JourneyApi {
 			const { stepId, param } = plan.missing;
 			const error = `missing param "${param}": pass it in start("${id}", { params }) or mount({ params })`;
 			console.error(`journey: ${id}: ${error}`);
-			if (from > 0) await clearProgress(store());
+			if (from > 0) await progress.clear();
 			return { ok: false, completed: 0, failures: [{ stepId, error }] };
 		}
 		for (const name of plan.ask) params[name] = '';
@@ -297,21 +298,18 @@ export function mount(input: MountOptions = {}): JourneyApi {
 			navigate: options.navigate,
 			progress: {
 				save(index, acted, navigated) {
-					void writeProgress(
-						{
-							id,
-							version: ir.version,
-							index,
-							mode,
-							params: stored,
-							variant,
-							acted,
-							navigated,
-						},
-						store(),
-					);
+					void progress.write({
+						id,
+						version: ir.version,
+						index,
+						mode,
+						params: stored,
+						variant,
+						acted,
+						navigated,
+					});
 				},
-				clear: () => void clearProgress(store()),
+				clear: () => void progress.clear(),
 			},
 		});
 		engine = run;
@@ -342,24 +340,24 @@ export function mount(input: MountOptions = {}): JourneyApi {
 	}
 
 	async function resume(supplied: Params | undefined): Promise<void> {
-		const progress = await readProgress(store());
-		if (!mounted || !progress || progress.mode === DRIVER_MODE || engine) return;
-		const ir = journeys.get(progress.id);
-		if (!ir || ir.version !== progress.version) return;
-		const from = progress.index;
+		const saved = await progress.read();
+		if (!mounted || !saved || saved.mode === DRIVER_MODE || engine) return;
+		const ir = journeys.get(saved.id);
+		if (!ir || ir.version !== saved.version) return;
+		const from = saved.index;
 		if (from >= ir.steps.length) {
-			await clearProgress(store());
+			await progress.clear();
 			return;
 		}
 		void startRun(
-			progress.id,
+			saved.id,
 			{
-				mode: progress.mode as Mode,
+				mode: saved.mode as Mode,
 				from,
-				params: { ...progress.params, ...supplied },
-				variant: progress.variant,
+				params: { ...saved.params, ...supplied },
+				variant: saved.variant,
 			},
-			{ acted: progress.acted === true, navigated: progress.navigated === true },
+			{ acted: saved.acted === true, navigated: saved.navigated === true },
 		).catch(() => {});
 	}
 

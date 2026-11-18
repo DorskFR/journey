@@ -293,7 +293,9 @@ page re-renders is found again.
 
 Escape exits the guide, unless the page handled it first (`preventDefault()`),
 focus is in an open dialog, popover, menu or listbox or on an expanded
-control, or the step itself asks the user to press Escape.
+control, or the step itself asks the user to press Escape. Enter, Space and
+ArrowRight press Next while focus is on the card or the page body; on a page
+button, slider, tab list or other control they go to that control.
 
 Keyboard users are not dropped on `<body>`: a card with Next focuses it, a
 step waiting for the user focuses its target (or the card) when focus was
@@ -321,6 +323,8 @@ second to `localStorage`, which keeps them in one browser.
 Pass a `storage` adapter to put them somewhere else — a user record on the
 server, so a guide half-finished on a laptop carries on at a desk, and the
 backend can decide to show it again. It may be async, and it replaces both.
+Progress reads, writes and removes are made one at a time, each after the
+previous one settled.
 
 ```ts
 mount({
