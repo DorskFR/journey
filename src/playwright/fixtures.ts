@@ -181,16 +181,31 @@ interface StorageState {
 	origins?: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>;
 }
 
+const appliedStates = new WeakMap<BrowserContext, Set<string>>();
+
 export async function applyStorageState(context: BrowserContext, file: string): Promise<void> {
+	const applied = appliedStates.get(context) ?? new Set<string>();
+	appliedStates.set(context, applied);
+	if (applied.has(file)) return;
+	applied.add(file);
 	const state = JSON.parse(readFileSync(file, 'utf8')) as StorageState;
 	if (state.cookies?.length) await context.addCookies(state.cookies);
 	if (state.origins?.length) {
-		await context.addInitScript((origins: NonNullable<StorageState['origins']>) => {
-			for (const entry of origins) {
-				if (entry.origin !== location.origin) continue;
-				for (const item of entry.localStorage) localStorage.setItem(item.name, item.value);
-			}
-		}, state.origins);
+		await context.addInitScript(
+			({ origins, marker }: { origins: NonNullable<StorageState['origins']>; marker: string }) => {
+				try {
+					if (sessionStorage.getItem(marker) !== null) return;
+					sessionStorage.setItem(marker, '1');
+				} catch {
+					return;
+				}
+				for (const entry of origins) {
+					if (entry.origin !== location.origin) continue;
+					for (const item of entry.localStorage) localStorage.setItem(item.name, item.value);
+				}
+			},
+			{ origins: state.origins, marker: `journey:storage-state:${file}` },
+		);
 	}
 }
 

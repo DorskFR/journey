@@ -670,15 +670,19 @@ protocol is used out of order.
 `inject.ts`: `runtimeSource()` and `editorSource()` read the IIFE files from
 `dist` next to the compiled module (`new URL('../runtime.iife.js', import.meta.url)`).
 
-`driver.ts`: the start URL gets a `journey=run` query parameter so an app
-can decide to mount the runtime with its probes and variant handlers for
-driven runs (the demo does); the driver only mounts `{}` itself when the app
-did not. `runJourney(page, ir, opts)` where opts are
+`driver.ts`: every same-origin URL the driver opens gets a `journey=run` query
+parameter so an app can decide to mount the runtime with its probes and
+variant handlers for driven runs (the demo does); the driver only mounts `{}`
+itself when the app did not. For the length of a run the flag also sits in
+`sessionStorage` (`journey:run`), and an init script puts it back into the URL
+with `history.replaceState` before the app's scripts on any document the run
+loads without it (a link, a reload, a form post). `runJourney(page, ir, opts)` where opts are
 `{ baseUrl, params, variant, presenter, mask, pace, onCapture?: (spec, ctx) => Promise<void>, applyVariant?: boolean }`.
 It adds the runtime as an init script on the page's context if not already
-added (track with a WeakSet), sets the viewport for the variant, navigates to
-`baseUrl + ir.route`, applies non-viewport variant dims via
-`applyVariant`, then loops on the protocol. Actions map to `locator.click()`,
+added (track with a WeakSet), sets the viewport for the variant (an unknown
+viewport name throws), navigates to `baseUrl + ir.route`, applies non-viewport
+variant dims via `applyVariant`, then loops on the protocol, applying them
+again after every later document load. Actions map to `locator.click()`,
 `dblclick()`, `fill()`, `selectOption()`, `setChecked()`, `press()`, `hover()`,
 `page.goto()`. Returns `RunResult`. Per-action Playwright timeout equals the
 step timeout.
@@ -696,7 +700,8 @@ same journey.
 `fixtures.ts`: `applyFixture(name, config, ctx)` runs `command` and polls
 `ready` (default `app.url`) until 200 or `timeout`, returns a stop function;
 `routeFromHAR(har, { url: harUrl, notFound })` on the context; `storageState`
-is passed at context creation; `setup` returns params merged under
+is applied once per context: cookies with `addCookies`, local storage by an
+init script that runs on the first document of each origin per tab only; `setup` returns params merged under
 `fixture.*`; `params` merged the same way. Config `vars` are exposed under
 `var.*` and the variant under `variant.*`.
 
@@ -770,11 +775,19 @@ or cross.
   `tour.webm` when `--video` or any capture has `video`, converts to `mp4`
   and `gif` when ffmpeg exists (formats from config, default webm and mp4),
   writes `storyboard.png`, `manifest.json`, `index.md`, `index.html`.
+  `--variant` repeats of one dim are OR, dims are AND; an unknown dim or value,
+  or a filter no selected journey matches, exits 1 listing the valid ones. The
+  journey-level `<out>/book/<id>/manifest.json` and index merge this run's
+  variants with the ones already booked on disk, in matrix order.
   `variantKey` is the dims joined with `-` in config order, for example
   `desktop-light`.
 - `pages`: for each `config.pages` route and variant, navigates and captures
   the viewport to `<out>/pages/<name>/<variantKey>.png`, writes
-  `<out>/pages/index.md` with a table per page.
+  `<out>/pages/index.md` with a table per page. The default `name` is the
+  route's path (without its extension), query and hash, lowercased, with every
+  run of other characters turned into `-`, `home` when empty. A `name` must
+  match `^[A-Za-z0-9][A-Za-z0-9._-]*$`; two pages with one name (case-folded)
+  fail before anything runs.
 
 `media.ts`: `hasFfmpeg()`; `toMp4(webm, mp4)` with
 `-c:v libx264 -pix_fmt yuv420p -movflags +faststart -crf 23`; `toGif(webm, gif)`

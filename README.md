@@ -123,6 +123,28 @@ journeys; it holds live session tokens, so never commit it.
 and stop it on every exit, Ctrl-C included. When it never answers, the error
 ends with the last 40 lines it printed.
 
+A driven run (`check`, `test`, `book`) opens the app with `?journey=run` and
+keeps that flag on every page it loads, links and reloads included, so an app
+that mounts its probes and variant handlers only under `?journey=` keeps them
+after a full navigation. The run's variants are applied again after every
+load, so a journey that changes a varied setting itself (the theme of a
+`theme` variant) sees it reset on the next full navigation. A `viewport`
+value needs a size: one that is not `desktop`, `mobile` or declared in
+`variants.viewport` fails the run. `storageState` seeds cookies and local
+storage once, at the start; what the journey stores afterwards survives
+later loads.
+
+`book --variant dim=value` books only the matching variants; repeating a dim
+matches any of its values (`--variant viewport=desktop --variant
+viewport=mobile`), and an unknown dim or value exits 1 with the valid ones.
+The journey's `manifest.json` and index keep the variants already booked on
+disk.
+
+`pages` names each route's directory after its path, query and hash in
+lowercase letters, digits and `-`: `/` is `home`, `/users/1/edit` is
+`users-1-edit`, `/?tab=2` is `tab-2`. Two routes with one name (`/notes` and
+`/#notes`) fail: give one a `name`.
+
 Journey ids, step ids, capture names and variant values become file names, so
 they must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (`create-note`, `step_2.a`).
 

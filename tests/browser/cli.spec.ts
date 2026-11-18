@@ -293,6 +293,44 @@ test.describe('book and pages', () => {
 		expect(combined.variants[key]?.captures[0]?.file).toBe(`${key}/01-notes.png`);
 	});
 
+	test('booking one more variant keeps the variants already booked in the journey index', async () => {
+		test.setTimeout(120000);
+		const run = await journey([
+			'book',
+			'create-note',
+			'--variant',
+			'viewport=mobile',
+			'--config',
+			config,
+		]);
+		expect(run.code, run.stderr).toBe(0);
+		const keys = variantMatrix(demoConfig, createNoteIR).map(variantKey);
+		expect(keys).toHaveLength(2);
+		const journeyDir = join(out, 'book', 'create-note');
+		const combined = JSON.parse(
+			readFileSync(join(journeyDir, 'manifest.json'), 'utf8'),
+		) as Manifest;
+		expect(Object.keys(combined.variants)).toEqual(keys);
+		const md = readFileSync(join(journeyDir, 'index.md'), 'utf8');
+		for (const key of keys) expect(md).toContain(`(${key}/01-notes.png)`);
+	});
+
+	test('a --variant that names no variant exits 1 with the valid values', async () => {
+		const typo = await journey([
+			'book',
+			'create-note',
+			'--variant',
+			'viewport=dekstop',
+			'--config',
+			config,
+		]);
+		expect(typo.code).toBe(1);
+		expect(typo.stderr).toContain('unknown viewport "dekstop", expected one of: desktop, mobile');
+		const dim = await journey(['book', '--variant', 'size=desktop', '--config', config]);
+		expect(dim.code).toBe(1);
+		expect(dim.stderr).toContain('unknown variant dim "size"');
+	});
+
 	test('book with the guide presenter runs settings-theme on its matrix', async () => {
 		test.setTimeout(120000);
 		const run = await journey([

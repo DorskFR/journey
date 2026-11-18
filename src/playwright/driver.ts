@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import type { Capture, Interaction, IR } from '../core/types.js';
 import type { LoadOptions, SettleResult, StepResult } from '../runtime/driver.js';
 import type { Pace, RunResult } from '../runtime/engine.js';
-import { injectRuntime } from './inject.js';
+import { injectRuntime, RUN_FLAG_KEY, RUN_QUERY } from './inject.js';
 
 export interface Viewport {
 	width: number;
@@ -43,13 +43,11 @@ export const BUILTIN_VIEWPORTS: Record<string, Viewport> = {
 	mobile: { width: 390, height: 844 },
 };
 
-export const RUN_QUERY = 'journey';
-
 type Api = NonNullable<Window['__journey']>;
 
 export function startUrl(baseUrl: string, route: string): string {
 	const url = new URL(route, baseUrl);
-	url.searchParams.set(RUN_QUERY, 'run');
+	if (url.origin === new URL(baseUrl).origin) url.searchParams.set(RUN_QUERY, 'run');
 	return url.href;
 }
 
@@ -104,7 +102,7 @@ export async function performAction(
 			await locator.press(action.key, { timeout });
 			return;
 		case 'navigate':
-			await page.goto(new URL(action.url, baseUrl).href);
+			await page.goto(startUrl(baseUrl, action.url));
 			return;
 		case 'none':
 			return;
@@ -216,13 +214,12 @@ export async function runJourney(page: Page, ir: IR, opts: RunOptions): Promise<
 	const variant = { viewport: 'desktop', ...opts.variant };
 	const params: Record<string, string> = { ...opts.params };
 	for (const [dim, value] of Object.entries(variant)) params[`variant.${dim}`] = value;
-	const viewport =
-		opts.viewports?.[variant.viewport] ?? BUILTIN_VIEWPORTS[variant.viewport] ?? null;
-	if (viewport) await page.setViewportSize(viewport);
+	const viewport = opts.viewports?.[variant.viewport] ?? BUILTIN_VIEWPORTS[variant.viewport];
+	if (!viewport) throw new Error(`journey driver: viewport "${variant.viewport}" has no size`);
+	await page.setViewportSize(viewport);
 
-	await page.goto(startUrl(opts.baseUrl, ir.route));
-	await ensureMounted(page);
-	if (opts.applyVariant !== false) {
+	const applyVariants = async (): Promise<void> => {
+		if (opts.applyVariant === false) return;
 		for (const [dim, value] of Object.entries(variant)) {
 			if (dim === 'viewport') continue;
 			await page.evaluate(([d, v]) => (window.__journey as Api).applyVariant(d, v), [
@@ -230,7 +227,32 @@ export async function runJourney(page: Page, ir: IR, opts: RunOptions): Promise<
 				value,
 			] as const);
 		}
+	};
+
+	await page.goto(startUrl(opts.baseUrl, ir.route));
+	await ensureMounted(page);
+	await page.evaluate(([key, value]) => sessionStorage.setItem(key, value), [
+		RUN_FLAG_KEY,
+		'run',
+	] as const);
+	try {
+		return await drive(page, ir, opts, params, variant, applyVariants);
+	} finally {
+		await page
+			.evaluate((key) => sessionStorage.removeItem(key), RUN_FLAG_KEY)
+			.catch(() => undefined);
 	}
+}
+
+async function drive(
+	page: Page,
+	ir: IR,
+	opts: RunOptions,
+	params: Record<string, string>,
+	variant: Record<string, string>,
+	applyVariants: () => Promise<void>,
+): Promise<RunResult> {
+	await applyVariants();
 
 	const loadOpts: LoadOptions = {
 		params,
@@ -249,6 +271,7 @@ export async function runJourney(page: Page, ir: IR, opts: RunOptions): Promise<
 
 	const reload = async (): Promise<void> => {
 		await ensureMounted(page);
+		await applyVariants();
 		await load(page, ir, loadOpts);
 	};
 
@@ -262,7 +285,7 @@ export async function runJourney(page: Page, ir: IR, opts: RunOptions): Promise<
 		const r = await step(page);
 		if (r.done) return finish(r.result);
 		if ('route' in r) {
-			await page.goto(new URL(r.route, opts.baseUrl).href);
+			await page.goto(startUrl(opts.baseUrl, r.route));
 			await reload();
 			continue;
 		}

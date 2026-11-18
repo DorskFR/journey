@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Browser } from '@playwright/test';
 import type { Capture, IR } from '../core/types.js';
@@ -36,22 +36,83 @@ export const DEFAULT_FORMATS: VideoFormat[] = ['webm', 'mp4'];
 const PRESENTERS: Presenter[] = ['doc', 'spot', 'guide', 'none'];
 const PLACEMENTS: Placement[] = ['anchored', 'banner'];
 
-export function parseVariantFilter(value: string | undefined): Record<string, string> {
-	const out: Record<string, string> = {};
+export type VariantFilter = Record<string, string[]>;
+
+export function parseVariantFilter(value: string | undefined): VariantFilter {
+	const out: VariantFilter = {};
 	for (const part of (value ?? '').split(REPEAT_SEPARATOR)) {
 		if (!part) continue;
 		const eq = part.indexOf('=');
 		if (eq <= 0) throw new Error(`journey book: --variant expects dim=value, got "${part}"`);
-		out[part.slice(0, eq)] = part.slice(eq + 1);
+		const dim = part.slice(0, eq);
+		const value = part.slice(eq + 1);
+		const values = out[dim] ?? [];
+		if (!values.includes(value)) values.push(value);
+		out[dim] = values;
 	}
 	return out;
 }
 
-export function matchesFilter(
-	variant: Record<string, string>,
-	filter: Record<string, string>,
-): boolean {
-	return Object.entries(filter).every(([dim, value]) => variant[dim] === value);
+export function matchesFilter(variant: Record<string, string>, filter: VariantFilter): boolean {
+	return Object.entries(filter).every(([dim, values]) => values.includes(variant[dim] ?? ''));
+}
+
+export function checkVariantFilter(
+	filter: VariantFilter,
+	matrices: Array<Array<Record<string, string>>>,
+): void {
+	const known = new Map<string, Set<string>>();
+	for (const variant of matrices.flat()) {
+		for (const [dim, value] of Object.entries(variant)) {
+			const values = known.get(dim) ?? new Set<string>();
+			known.set(dim, values.add(value));
+		}
+	}
+	for (const [dim, values] of Object.entries(filter)) {
+		const valid = known.get(dim);
+		if (!valid) {
+			throw new Error(
+				`journey book: unknown variant dim "${dim}", expected one of: ${[...known.keys()].join(', ')}`,
+			);
+		}
+		const unknown = values.filter((value) => !valid.has(value));
+		if (unknown.length) {
+			throw new Error(
+				`journey book: unknown ${dim} ${unknown.map((v) => `"${v}"`).join(', ')}, expected one of: ${[...valid].join(', ')}`,
+			);
+		}
+	}
+	if (!matrices.flat().some((variant) => matchesFilter(variant, filter))) {
+		const asked = Object.entries(filter)
+			.map(([dim, values]) => `${dim}=${values.join('|')}`)
+			.join(' ');
+		throw new Error(`journey book: no variant of the selected journeys matches --variant ${asked}`);
+	}
+}
+
+export function readManifest(dir: string): Manifest | null {
+	try {
+		const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
+		return manifest && typeof manifest.variants === 'object' ? manifest : null;
+	} catch {
+		return null;
+	}
+}
+
+export function mergeJourneyManifest(
+	journeyDir: string,
+	booked: Manifest,
+	matrix: Array<Record<string, string>>,
+): Manifest {
+	const previous = readManifest(journeyDir)?.variants ?? {};
+	const variants: Manifest['variants'] = {};
+	for (const variant of matrix) {
+		const key = variantKey(variant);
+		const kept = previous[key];
+		if (booked.variants[key]) variants[key] = booked.variants[key];
+		else if (kept && existsSync(join(journeyDir, key, 'manifest.json'))) variants[key] = kept;
+	}
+	return { ...booked, variants };
 }
 
 export function presenterOf(argv: Argv, loaded: LoadedConfig): Presenter {
@@ -210,6 +271,23 @@ export async function runBook(argv: Argv): Promise<number> {
 	}
 	const selected = selectJourneys(journeys, argv.positional);
 	const filter = parseVariantFilter(flagString(argv, 'variant'));
+	if (Object.keys(filter).length) {
+		checkVariantFilter(
+			filter,
+			selected.map((entry) => variantMatrix(loaded.config, entry.ir)),
+		);
+	}
+	const sizes = viewports(loaded.config);
+	for (const entry of selected) {
+		for (const variant of variantMatrix(loaded.config, entry.ir)) {
+			const name = variant.viewport ?? 'desktop';
+			if (matchesFilter(variant, filter) && !sizes[name]) {
+				throw new Error(
+					`journey book: viewport "${name}" of ${entry.ir.id} has no size, declare it in config.variants.viewport`,
+				);
+			}
+		}
+	}
 	const opts: BookOptions = {
 		presenter: presenterOf(argv, loaded),
 		placement: placementOf(argv, loaded),
@@ -228,7 +306,8 @@ export async function runBook(argv: Argv): Promise<number> {
 		for (const entry of selected) {
 			const ir = entry.ir;
 			const journeyDir = join(out, ir.id);
-			const variants = variantMatrix(loaded.config, ir).filter((v) => matchesFilter(v, filter));
+			const matrix = variantMatrix(loaded.config, ir);
+			const variants = matrix.filter((v) => matchesFilter(v, filter));
 			const combined: Manifest = {
 				id: ir.id,
 				title: '',
@@ -236,6 +315,7 @@ export async function runBook(argv: Argv): Promise<number> {
 				variants: {},
 			};
 			const labels: Record<string, string> = {};
+			for (const variant of matrix) labels[variantKey(variant)] = variantLabel(variant);
 			for (const variant of variants) {
 				const key = variantKey(variant);
 				const dir = variantDir(out, ir.id, key);
@@ -247,7 +327,6 @@ export async function runBook(argv: Argv): Promise<number> {
 					version: ir.version,
 					variants: { [key]: result.manifest },
 				};
-				labels[key] = variantLabel(variant);
 				writeManifest(dir, manifest);
 				writeReport(dir, manifest, labels);
 				combined.title ||= title;
@@ -258,8 +337,9 @@ export async function runBook(argv: Argv): Promise<number> {
 				);
 			}
 			if (variants.length) {
-				writeManifest(journeyDir, combined);
-				writeReport(journeyDir, combined, labels);
+				const merged = mergeJourneyManifest(journeyDir, combined, matrix);
+				writeManifest(journeyDir, merged);
+				writeReport(journeyDir, merged, labels);
 			}
 		}
 	});

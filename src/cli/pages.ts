@@ -22,13 +22,17 @@ export interface PageEntry {
 }
 
 export function pageName(route: string): string {
-	const name = route
-		.replace(/^\/+/, '')
-		.replace(/\.[a-z0-9]+$/i, '')
-		.replace(/#/g, '-')
+	const url = new URL(route, 'http://journey.invalid');
+	const path = url.pathname.replace(/\.[a-z0-9]+$/i, '');
+	const name = [path, url.search.slice(1), url.hash.slice(1)]
+		.join('-')
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
 		.replace(/^-+|-+$/g, '');
 	return name || 'home';
 }
+
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function combinations(dims: Record<string, string[]>): Array<Record<string, string>> {
 	const axes = Object.entries(dims).filter(([, values]) => values.length);
@@ -42,13 +46,23 @@ export function combinations(dims: Record<string, string[]>): Array<Record<strin
 
 export function pageEntries(config: Config): PageEntry[] {
 	const configDims = variantNames(config);
+	const routes = new Map<string, string>();
 	return (config.pages ?? []).map((entry) => {
 		const spec = typeof entry === 'string' ? { route: entry } : entry;
-		return {
-			route: spec.route,
-			name: spec.name ?? pageName(spec.route),
-			variants: combinations(spec.variants ?? configDims),
-		};
+		const name = spec.name ?? pageName(spec.route);
+		if (!SAFE_NAME.test(name)) {
+			throw new Error(
+				`journey pages: name "${name}" of ${spec.route} must start with a letter or digit and use only letters, digits, ".", "_" or "-"`,
+			);
+		}
+		const taken = routes.get(name.toLowerCase());
+		if (taken !== undefined) {
+			throw new Error(
+				`journey pages: ${taken} and ${spec.route} are both named "${name}", give one a \`name\``,
+			);
+		}
+		routes.set(name.toLowerCase(), spec.route);
+		return { route: spec.route, name, variants: combinations(spec.variants ?? configDims) };
 	});
 }
 
