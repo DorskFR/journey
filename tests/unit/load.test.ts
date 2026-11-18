@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { loadBookJourneys } from '../../src/cli/book.js';
@@ -15,9 +15,15 @@ const source = `export default {
 };
 `;
 
+const dirs: string[] = [];
+test.afterEach(() => {
+	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 function fixture(): LoadedConfig {
 	const dir = fileURLToPath(new URL(`../../tmp/load-${Date.now()}/`, import.meta.url));
 	mkdirSync(dir, { recursive: true });
+	dirs.push(dir);
 	writeFileSync(`${dir}/settings.journey.ts`, source);
 	return { config: { journeys: '*.journey.ts' }, path: `${dir}/journey.config.ts`, dir };
 }

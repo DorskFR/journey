@@ -20,10 +20,12 @@
     "recorder"
   ],
   "engines": {
-    "node": ">=26"
+    "node": ">=24"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map",
+    "!dist/playwright/journeys.*.d.ts"
   ],
   "bin": {
     "journey": "dist/cli/main.js"
@@ -31,9 +33,14 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./runtime": {
       "types": "./dist/runtime/index.d.ts",
@@ -44,9 +51,14 @@
       "default": "./dist/editor/index.js"
     },
     "./playwright": {
-      "types": "./dist/playwright/index.d.ts",
-      "import": "./dist/playwright/entry.js",
-      "require": "./dist/playwright/index.cjs"
+      "import": {
+        "types": "./dist/playwright/index.d.ts",
+        "default": "./dist/playwright/entry.js"
+      },
+      "require": {
+        "types": "./dist/playwright/index.d.cts",
+        "default": "./dist/playwright/index.cjs"
+      }
     },
     "./runtime.iife.js": "./dist/runtime.iife.js",
     "./editor.iife.js": "./dist/editor.iife.js",

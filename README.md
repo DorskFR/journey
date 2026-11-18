@@ -9,6 +9,13 @@ npm i -D @dorsk/journey @playwright/test
 
 `@playwright/test` is an optional peer: an app that only ships the guide or
 the editor installs `@dorsk/journey` alone (see [In the app](#in-the-app)).
+The CLI and the Playwright side need Node 24 or later.
+
+`.` and `./playwright` ship ES modules and CommonJS copies, each with its own
+types. `./runtime` and `./editor` are ES modules only: bundlers import them,
+and `require()` loads them through Node's require of ES modules. TypeScript
+types such a `require` with `"module": "nodenext"`; under `node16` use
+`import()`.
 
 One declarative `.journey.ts` file per flow. One in-page engine that runs it
 four ways:

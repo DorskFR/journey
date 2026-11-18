@@ -99,7 +99,9 @@ Build: `scripts/version.mjs` writes `src/version.ts` from package.json;
 `scripts/bundle.mjs` produces `dist/runtime.iife.js` (global `journeyRuntime`)
 and `dist/editor.iife.js` (global `journeyEditor`) with esbuild, plus
 CommonJS copies `dist/index.cjs` and `dist/playwright/index.cjs` served by
-the `require` export conditions. Playwright transpiles a user's `.ts` config,
+the `require` export conditions, typed by `.d.cts` copies of the declarations
+they reach. `./runtime` and `./editor` are ESM only; `require()` reaches them
+through Node's require(esm). No source maps ship. Playwright transpiles a user's `.ts` config,
 journeys and specs to CommonJS when their package has no `"type": "module"`,
 and a `require` of an ES module that is still being linked by the runner
 fails, so those two entry points must exist in both formats. Dynamic imports
@@ -989,6 +991,14 @@ Unit (`tests/unit`):
 - `print.test.ts`: `print(compile(j))` is stable: compiling the printed
   source again (write to a temp file, dynamic import) yields deep-equal IR;
   `msg` and `param` round trip; output uses tabs and single quotes.
+- `engine.test.ts`, `driver.test.ts`, `actors.test.ts`, `text.test.ts`: the
+  engine step loop, timeouts, `when`/`optional` skips, every expectation kind,
+  masks, abort and resume; the driver protocol order and resume; the dom,
+  human, stepped and driver actors; text, param and string resolution. They
+  run against `fake-dom.ts`, a minimal DOM installed on `globalThis`.
+- `cli-helpers.test.ts`: the pure CLI and Playwright-side helpers (variant
+  matrix, filters, env vars, flags, crop, screenshot retry, report and pages
+  rendering).
 
 Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
 `addInitScript` unless it uses the demo's own `?journey=` mount:
@@ -1040,5 +1050,11 @@ Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
   `check` print the install hint, and a strip-only failure in `compile`
   states the supported subset.
 
+`scripts/pack-smoke.mjs` (CI, after the build): packs the package, installs
+the tarball with `--engine-strict` in a temp project, imports and requires
+every entry, checks the peer hint without `@playwright/test`, runs
+`journey --version`, type-checks ESM and CommonJS consumers, and fails on
+shipped source maps.
+
 All tests must pass with `npm test` locally and in CI on Ubuntu with
-Chromium only.
+Chromium only, on Node 24 and 26.
