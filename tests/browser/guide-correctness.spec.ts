@@ -139,7 +139,7 @@ test.describe('Escape', () => {
 		await page.evaluate(() => {
 			(document.querySelector('[data-journey="host-dialog"]') as HTMLDialogElement).showModal();
 		});
-		await page.locator('[data-journey="host-dialog"] button').focus();
+		await page.locator('[data-journey="host-dialog"] > button').focus();
 		await page.keyboard.press('Escape');
 		await expect(page.locator('[data-journey="host-dialog"]')).toBeHidden();
 		expect(await current(page)).toEqual({ id: 'tour', index: 0 });
