@@ -108,6 +108,10 @@ removed, but response bodies stay: review the HAR before committing it.
 `.journey/<id>.storage.json`, a self-gitignored directory outside the
 journeys; it holds live session tokens, so never commit it.
 
+`check`, `book` and `pages` start `app.start` when `app.url` does not answer,
+and stop it on every exit, Ctrl-C included. When it never answers, the error
+ends with the last 40 lines it printed.
+
 Journey ids, step ids, capture names and variant values become file names, so
 they must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (`create-note`, `step_2.a`).
 
@@ -287,8 +291,9 @@ mount({
 
 ## What the captures show
 
-`book` draws each step with a presenter, chosen with `--presenter` or
-`presenter` in the config:
+`book` writes to `<out>/book/<id>/<variant>/`, apart from the `level: 'visual'`
+baselines `journey test` keeps under `<out>/<id>/`, and draws each step with a
+presenter, chosen with `--presenter` or `presenter` in the config:
 
 | | drawn |
 | --- | --- |

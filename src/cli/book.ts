@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { type Browser, chromium } from '@playwright/test';
+import type { Browser } from '@playwright/test';
 import type { Capture, IR } from '../core/types.js';
 import { captureStep, startVideo } from '../playwright/capture.js';
-import type { CaptureContext } from '../playwright/driver.js';
+import { type CaptureContext, errorLine } from '../playwright/driver.js';
 import { failureMessage, runConfigured } from '../playwright/index.js';
 import { resolveText } from '../runtime/text.js';
-import { ensureApp } from './app.js';
+import { withAppBrowser } from './app.js';
 import {
 	type LoadedConfig,
 	loadConfig,
@@ -78,6 +78,12 @@ export function captureFile(index: number, name: string): string {
 	return `${String(index + 1).padStart(2, '0')}-${name}.png`;
 }
 
+export const BOOK_DIR = 'book';
+
+export function bookRoot(loaded: LoadedConfig): string {
+	return join(outDir(loaded), BOOK_DIR);
+}
+
 export function variantDir(out: string, id: string, key: string): string {
 	const root = resolve(out);
 	const dir = resolve(root, id, key);
@@ -137,6 +143,9 @@ async function bookVariant(
 	dir: string,
 	opts: BookOptions,
 ): Promise<{ ok: boolean; error?: string; manifest: ManifestVariant }> {
+	if (existsSync(dir) && !statSync(dir).isDirectory()) {
+		throw new Error(`journey book: refusing to replace ${dir}, it is not a directory`);
+	}
 	rmSync(dir, { recursive: true, force: true });
 	mkdirSync(dir, { recursive: true });
 	const viewport = viewports(loaded.config)[variant.viewport ?? 'desktop'];
@@ -167,7 +176,8 @@ async function bookVariant(
 		ok = result.ok;
 		if (!ok) error = failureMessage(result).replace(/\n/g, '; ');
 	} catch (e) {
-		error = e instanceof Error ? e.message : String(e);
+		error = errorLine(e);
+		console.error(e instanceof Error ? e.message : String(e));
 	} finally {
 		if (stopVideo) await stopVideo();
 		await context.close();
@@ -206,17 +216,15 @@ export async function runBook(argv: Argv): Promise<number> {
 		video: argv.flags.video === true,
 		formats: loaded.config.video?.formats ?? DEFAULT_FORMATS,
 	};
-	const out = outDir(loaded);
+	const out = bookRoot(loaded);
 	const launch = launchOptions(argv);
 	if (!launch.headless) {
 		console.error(
 			'journey book: --headed writes to the same files as a headless run, but window chrome and frame timing differ; do not commit these captures',
 		);
 	}
-	const stopApp = await ensureApp(loaded);
-	const browser = await chromium.launch(launch);
 	let failed = 0;
-	try {
+	await withAppBrowser(loaded, launch, async (browser) => {
 		for (const entry of selected) {
 			const ir = entry.ir;
 			const journeyDir = join(out, ir.id);
@@ -254,9 +262,6 @@ export async function runBook(argv: Argv): Promise<number> {
 				writeReport(journeyDir, combined, labels);
 			}
 		}
-	} finally {
-		await browser.close();
-		await stopApp();
-	}
+	});
 	return failed ? 1 : 0;
 }

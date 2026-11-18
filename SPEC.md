@@ -708,7 +708,13 @@ or cross.
 - `check`: starts the app when `app.start` is set, runs every journey and
   variant with presenter `none` at smoke level, prints a table with pass
   or fail and the number of fallback and fragile targets, exit 1 on failure.
-  `--strict` also fails when any target is not `stable`.
+  `--strict` also fails when any target is not `stable`. A failed action
+  (click intercepted, element detached, action timeout) is that step's
+  failure, `<kind> failed: <first line of the error>`, like an expectation.
+- `check`, `book` and `pages` stop the app and fixture commands they started
+  on every exit path: success, error, a browser that fails to launch, SIGINT
+  (exit 130) and SIGTERM (exit 143). A command's output is kept; when it exits
+  or never answers, the error ends with its exit code and last 40 lines.
 - Config `vars` are merged with the JSON object in the `JOURNEY_VARS`
   environment variable when set, so secrets never have to be written down.
 - `test [playwright args...]`: spawns `npx playwright test -c <dist>/playwright/journeys.config.js`
@@ -730,7 +736,8 @@ or cross.
   are compiled with `public: false`: a `qaOnly` step is hidden from the app
   guide but still runs and captures in the book, so the storyboard matches
   what QA exercises; for each journey and variant runs with the chosen presenter, captures every
-  capture step to `<out>/<id>/<variantKey>/<NN>-<name>.png`, records
+  capture step to `<out>/book/<id>/<variantKey>/<NN>-<name>.png` (never the
+  `visual` baselines under `<out>/<id>/`), records
   `tour.webm` when `--video` or any capture has `video`, converts to `mp4`
   and `gif` when ffmpeg exists (formats from config, default webm and mp4),
   writes `storyboard.png`, `manifest.json`, `index.md`, `index.html`.
@@ -841,7 +848,8 @@ Unit (`tests/unit`):
 - `record.test.ts`: the recorder prints source from the exported IR and
   rejects unsafe ids; storage state is opt-in and lands outside the journeys
   dir; the HAR loses auth headers and secret request bodies; `book` only
-  writes `<out>/<id>/<variant>`; the focus selector quotes the step id.
+  writes `<out>/book/<id>/<variant>`, a path no snapshot baseline can take;
+  the focus selector quotes the step id.
 - `compile.test.ts`: defaults filled; `public` strips `qaOnly` steps and `qa.`
   probes; `publicDrops` and `dropLine` name what a strip removed; IR is JSON
   serializable.

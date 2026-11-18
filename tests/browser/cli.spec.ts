@@ -205,7 +205,7 @@ test.describe('book and pages', () => {
 		const key = keys[0] as string;
 		expect(run.stdout.trim().split('\n')).toHaveLength(1);
 		expect(run.stdout).toContain(`✓ create-note`);
-		const dir = join(out, 'create-note', key);
+		const dir = join(out, 'book', 'create-note', key);
 		for (const file of ['01-notes.png', '02-dialog.png', '03-saved.png', 'storyboard.png']) {
 			expect(existsSync(join(dir, file)), file).toBe(true);
 		}
@@ -237,7 +237,7 @@ test.describe('book and pages', () => {
 			expect(variant?.video?.webm).toBe('tour.webm');
 		}
 		const combined = JSON.parse(
-			readFileSync(join(out, 'create-note', 'manifest.json'), 'utf8'),
+			readFileSync(join(out, 'book', 'create-note', 'manifest.json'), 'utf8'),
 		) as Manifest;
 		expect(combined.variants[key]?.captures[0]?.file).toBe(`${key}/01-notes.png`);
 	});
@@ -257,7 +257,7 @@ test.describe('book and pages', () => {
 		expect(keys).toEqual(['desktop-light']);
 		expect(run.stdout.trim().split('\n')).toHaveLength(keys.length);
 		for (const key of keys) {
-			const dir = join(out, 'settings-theme', key);
+			const dir = join(out, 'book', 'settings-theme', key);
 			expect(existsSync(join(dir, '01-dark.png')), key).toBe(true);
 			expect(existsSync(join(dir, '02-dark.png'))).toBe(false);
 			const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
@@ -277,7 +277,7 @@ test.describe('book and pages', () => {
 		]);
 		expect(run.code, run.stderr).toBe(0);
 		const key = variantKey(variantMatrix(demoConfig, settingsThemeIR)[0] as Record<string, string>);
-		const dir = join(out, 'settings-theme', key);
+		const dir = join(out, 'book', 'settings-theme', key);
 		expect(existsSync(join(dir, '01-dark.png'))).toBe(true);
 		const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest;
 		const captures = manifest.variants[key]?.captures ?? [];
