@@ -1,7 +1,7 @@
 import type { Interaction } from '../core/types.js';
 import { SENSITIVE_NAME } from '../core/validate.js';
 import { onHistoryChange } from '../runtime/route.js';
-import { interactiveAncestor } from './locate.js';
+import { interactiveAncestor, isInteractive } from './locate.js';
 import { currentRoute } from './runtime.js';
 
 export interface Observed<P> {
@@ -15,6 +15,7 @@ export interface ObserverOptions<P> {
 	ignore(event: Event): boolean;
 	prepare(el: Element): P;
 	emit(item: Observed<P>): void;
+	hovers?(): boolean;
 }
 
 export interface Observer {
@@ -24,15 +25,7 @@ export interface Observer {
 	attachRoute(route: string): void;
 }
 
-const PRESS_KEYS = new Set([
-	'Enter',
-	'Escape',
-	'Tab',
-	'ArrowUp',
-	'ArrowDown',
-	'ArrowLeft',
-	'ArrowRight',
-]);
+const PRESS_KEYS = new Set(['Enter', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 const NON_TEXT_TYPES = new Set([
 	'checkbox',
 	'radio',
@@ -46,6 +39,7 @@ const NON_TEXT_TYPES = new Set([
 	'hidden',
 ]);
 const CLICK_ROUTE_WINDOW = 500;
+export const HOVER_DWELL = 500;
 
 function inputType(el: Element): string {
 	return (el.getAttribute('type') ?? 'text').toLowerCase();
@@ -87,6 +81,10 @@ export function paramName(el: Element): string {
 	);
 }
 
+function isMultiline(el: Element): boolean {
+	return el.localName === 'textarea' || (el as HTMLElement).isContentEditable === true;
+}
+
 function skipsClick(el: Element): boolean {
 	if (el.localName === 'label') {
 		const control = (el as HTMLLabelElement).control;
@@ -103,9 +101,18 @@ export function createObserver<P>(options: ObserverOptions<P>): Observer {
 	let pendingRoute: string | undefined;
 	let active = false;
 	let unhook: (() => void) | null = null;
+	let dwell: { el: Element; timer: ReturnType<typeof setTimeout> } | null = null;
+	let hovered: Element | null = null;
 	const docs = new Set<Document>();
 
+	const cancelDwell = (): void => {
+		if (dwell) clearTimeout(dwell.timer);
+		dwell = null;
+	};
+
 	const emit = (item: Observed<P>): void => {
+		cancelDwell();
+		if (item.do.kind !== 'hover') hovered = null;
 		if (item.route === undefined && pendingRoute !== undefined) item.route = pendingRoute;
 		pendingRoute = undefined;
 		options.emit(item);
@@ -190,9 +197,34 @@ export function createObserver<P>(options: ObserverOptions<P>): Observer {
 		if (!PRESS_KEYS.has(key)) return;
 		const origin = targetOf(event);
 		if (!origin) return;
-		if (key === 'Enter' || key === 'Tab') flush();
+		if (key === 'Enter' && isMultiline(origin)) return;
+		if (key === 'Enter') flush();
 		const el = interactiveAncestor(origin);
 		emit({ el, prepared: options.prepare(el), do: { kind: 'press', key } });
+	};
+
+	const onMouseover = (event: Event): void => {
+		if (!options.hovers?.()) return;
+		const origin = targetOf(event);
+		if (!origin || !isInteractive(origin)) return;
+		const el = interactiveAncestor(origin);
+		if (el === hovered || dwell?.el === el) return;
+		cancelDwell();
+		const timer = setTimeout(() => {
+			dwell = null;
+			if (!active || !el.isConnected) return;
+			flush();
+			hovered = el;
+			emit({ el, prepared: options.prepare(el), do: { kind: 'hover' } });
+		}, HOVER_DWELL);
+		dwell = { el, timer };
+	};
+
+	const onMouseout = (event: Event): void => {
+		const next = (event as MouseEvent).relatedTarget;
+		const leaves = (el: Element): boolean => !(isElement(next) && el.contains(next));
+		if (hovered && leaves(hovered)) hovered = null;
+		if (dwell && leaves(dwell.el)) cancelDwell();
 	};
 
 	const onNavigation = (): void => {
@@ -228,6 +260,8 @@ export function createObserver<P>(options: ObserverOptions<P>): Observer {
 		['change', onChange],
 		['focusout', onFocusOut],
 		['keydown', onKeydown],
+		['mouseover', onMouseover],
+		['mouseout', onMouseout],
 		['load', onFrameLoad],
 	];
 
@@ -254,6 +288,8 @@ export function createObserver<P>(options: ObserverOptions<P>): Observer {
 		stop() {
 			if (!active) return;
 			flush();
+			cancelDwell();
+			hovered = null;
 			active = false;
 			pendingRoute = undefined;
 			for (const doc of docs) {

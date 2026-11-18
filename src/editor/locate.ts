@@ -16,6 +16,10 @@ export function interactiveAncestor(el: Element): Element {
 	return el.closest(INTERACTIVE) ?? el;
 }
 
+export function isInteractive(el: Element): boolean {
+	return el.closest(INTERACTIVE) !== null;
+}
+
 interface Link {
 	el: Element;
 	into: boolean;
@@ -53,19 +57,44 @@ function chain(el: Element): Link[] {
 	return links;
 }
 
-function segment(el: Element, keyed: boolean): string {
-	const name = el.getAttribute('data-journey') ?? '';
-	const key = el.getAttribute('data-journey-key');
-	return keyed && key !== null && key !== '' ? `${name}[${key}]` : name;
+export type PathStyle = 'key' | 'index';
+
+export interface LocateOptions {
+	prefer?: PathStyle;
 }
 
-function pathOf(links: Link[], keyedFrom: number): TargetPath {
-	return links
-		.map((link, i) => {
-			const sep = i === 0 ? '' : links[i - 1]?.into ? '>>' : '/';
-			return sep + segment(link.el, i >= keyedFrom);
-		})
-		.join('');
+function resolves(path: TargetPath): Element[] {
+	try {
+		return runtime().resolvePath(path, {}, document);
+	} catch {
+		return [];
+	}
+}
+
+function indexed(prefix: TargetPath, el: Element, name: string): string {
+	const found = resolves(prefix + name);
+	if (found.length < 2) return name;
+	for (let i = 0; i < found.length; i += 1) {
+		const seg = `${name}[#${i}]`;
+		if (resolves(prefix + seg).includes(el)) return seg;
+	}
+	return name;
+}
+
+function segment(el: Element, style: PathStyle | null, prefix: TargetPath): string {
+	const name = el.getAttribute('data-journey') ?? '';
+	if (style === 'index') return indexed(prefix, el, name);
+	const key = el.getAttribute('data-journey-key');
+	return style === 'key' && key !== null && key !== '' ? `${name}[${key}]` : name;
+}
+
+function pathOf(links: Link[], styledFrom: number, style: PathStyle = 'key'): TargetPath {
+	let path = '';
+	links.forEach((link, i) => {
+		const sep = i === 0 ? '' : links[i - 1]?.into ? '>>' : '/';
+		path += sep + segment(link.el, i >= styledFrom ? style : null, path + sep);
+	});
+	return path;
 }
 
 function matches(target: Target, el: Element): boolean {
@@ -76,28 +105,28 @@ function matches(target: Target, el: Element): boolean {
 	}
 }
 
-function scoped(links: Link[], el: Element): TargetPath | null {
-	for (let from = links.length; from >= 0; from -= 1) {
-		const path = pathOf(links, from);
-		if (matches(path, el)) return path;
+function scoped(links: Link[], el: Element, prefer: PathStyle): TargetPath | null {
+	const styles: PathStyle[] = prefer === 'index' ? ['index', 'key'] : ['key', 'index'];
+	for (const style of styles) {
+		for (let i = 0; i <= links.length; i += 1) {
+			const from = style === 'key' ? links.length - i : i;
+			const path = pathOf(links, from, style);
+			if (matches(path, el)) return path;
+		}
 	}
 	return null;
 }
 
-export function journeyPath(el: Element): TargetPath | null {
+export function journeyPath(el: Element, options: LocateOptions = {}): TargetPath | null {
 	const links = chain(el);
 	if (links.length === 0 || links[links.length - 1]?.el !== el) return null;
-	return scoped(links, el);
+	return scoped(links, el, options.prefer ?? 'key');
 }
 
 function reachable(el: Element): TargetPath | null {
 	const path = journeyPath(el) ?? pathOf(chain(el), 0);
 	if (path === '') return null;
-	try {
-		return runtime().resolvePath(path, {}, document).length > 0 ? path : null;
-	} catch {
-		return null;
-	}
+	return resolves(path).length > 0 ? path : null;
 }
 
 function hostScope(el: Element): TargetPath | null {
@@ -184,9 +213,9 @@ function fragile(el: Element): Target {
 	return { css: anchor ? `body > ${tail}` : tail, ...within };
 }
 
-export function locate(origin: Element): Located {
+export function locate(origin: Element, options: LocateOptions = {}): Located {
 	const el = interactiveAncestor(origin);
-	const path = journeyPath(el);
+	const path = journeyPath(el, options);
 	if (path !== null) return { el, target: path, health: 'stable' };
 	const locator = fallback(el);
 	if (locator !== null) return { el, target: locator, health: 'fallback' };

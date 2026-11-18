@@ -465,3 +465,123 @@ test('stopping a recorder started before the runtime keeps the runtime following
 	await expect(page.locator('journey-overlay .card')).toContainText('Hello');
 	await page.evaluate(() => localStorage.clear());
 });
+
+async function startRecording(page: Page, path = '/'): Promise<void> {
+	await page.goto(`${BASE}${path}?journey=edit`);
+	await waitForEditor(page);
+	await panel(page, 'record').click();
+	await expect(panel(page, 'stop')).toBeVisible();
+}
+
+test('a repeated element without a key is recorded as an indexed path', async ({ page }) => {
+	await startRecording(page);
+	await page.click('[data-journey="start"]');
+	await page.evaluate(() => {
+		for (const li of document.querySelectorAll('[data-journey="note"]')) {
+			li.removeAttribute('data-journey-key');
+		}
+	});
+	await page.locator('[data-journey="note"] [data-journey="pin"]').nth(1).click();
+	await panel(page, 'stop').click();
+	const d = await draft(page);
+	expect(d.steps.at(-1)?.target).toBe('notes/note[#1]/pin');
+	expect(d.steps.at(-1)?.health).toBe('stable');
+});
+
+test('Prefer index over key records indexes and survives a reload', async ({ page }) => {
+	await page.goto(`${BASE}/?journey=edit`);
+	await waitForEditor(page);
+	await panel(page, 'prefer-index').check();
+	await page.reload();
+	await page.waitForFunction(() => typeof window.__journeyEditor !== 'undefined');
+	await expect(panel(page, 'prefer-index')).toBeChecked();
+	await panel(page, 'record').click();
+	await page.click('[data-journey="start"]');
+	await page.locator('[data-journey="note"] [data-journey="delete"]').nth(1).click();
+	await panel(page, 'stop').click();
+	const d = await draft(page);
+	expect(d.steps.map((s) => s.target)).toEqual(['start', 'notes/note[#1]/delete']);
+
+	await panel(page, 'prefer-index').uncheck();
+	await panel(page, 'record').click();
+	await page.locator('[data-journey="note"] [data-journey="delete"]').nth(0).click();
+	await panel(page, 'stop').click();
+	expect((await draft(page)).steps.at(-1)?.target).toBe('notes/note[1]/delete');
+});
+
+test('Record hovers adds a hover after a dwell, folded into a click on the same element', async ({
+	page,
+}) => {
+	await startRecording(page);
+	await page.hover('[data-journey="reveal"]');
+	await page.waitForTimeout(800);
+	expect((await draft(page)).steps).toHaveLength(0);
+
+	await page.mouse.move(0, 0);
+	await panel(page, 'hovers').check();
+	await page.hover('[data-journey="reveal"]');
+	await expect
+		.poll(async () => (await draft(page)).steps.map((s) => s.do))
+		.toEqual([{ kind: 'hover' }]);
+	expect((await draft(page)).steps[0]?.target).toBe('reveal');
+
+	await page.click('[data-journey="reveal"]');
+	await page.hover('[data-journey="start"]');
+	await expect
+		.poll(async () => (await draft(page)).steps.map((s) => [s.target, s.do?.kind]))
+		.toEqual([
+			['reveal', 'click'],
+			['start', 'hover'],
+		]);
+	await page.click('[data-journey="start"]');
+	await panel(page, 'stop').click();
+	expect((await draft(page)).steps.map((s) => [s.target, s.do?.kind])).toEqual([
+		['reveal', 'click'],
+		['start', 'click'],
+	]);
+});
+
+test('Tab and Enter inside a textarea are not recorded as key presses', async ({ page }) => {
+	await startRecording(page, '/settings.html');
+	await page.evaluate(() => {
+		const area = document.createElement('textarea');
+		area.dataset.journey = 'bio';
+		document.body.append(area);
+	});
+	await page.click('[data-journey="bio"]');
+	await page.keyboard.type('one');
+	await page.keyboard.press('Enter');
+	await page.keyboard.type('two');
+	await page.keyboard.press('Tab');
+	await panel(page, 'stop').click();
+	const d = await draft(page);
+	expect(d.steps.map((s) => [s.target, s.do])).toEqual([
+		['bio', { kind: 'fill', value: 'one\ntwo' }],
+	]);
+});
+
+test('a resumed run after a full navigation still fills var.* params from Values', async ({
+	page,
+}) => {
+	await seedDraft(page, {
+		id: 'settings-vars',
+		title: '',
+		route: '/settings.html',
+		steps: [
+			{
+				id: 'token',
+				route: '/settings.html',
+				target: 'token',
+				do: { kind: 'fill', value: { $param: 'var.token' }, mask: true },
+				health: 'stable',
+				suggestions: [],
+			},
+		],
+	});
+	const value = page.locator('journey-overlay [data-editor="var"][data-name="token"]');
+	await value.fill('hunter2');
+	await panel(page, 'run').click();
+	await page.waitForURL(/\/settings\.html\?journey=edit$/);
+	await expect(row(page, 0)).toHaveAttribute('data-result', 'pass');
+	await expect(page.locator('[data-journey="token"]')).toHaveValue('hunter2');
+});
