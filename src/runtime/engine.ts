@@ -249,12 +249,12 @@ export class Engine {
 		fn: () => T | undefined | Promise<T | undefined>,
 		timeout: number | null,
 	): Promise<T | undefined> {
-		const deadline = timeout === null ? Number.POSITIVE_INFINITY : Date.now() + timeout;
+		const deadline = timeout === null ? Number.POSITIVE_INFINITY : performance.now() + timeout;
 		for (;;) {
 			if (this.aborted) throw new AbortError();
 			const value = await fn();
 			if (value !== undefined) return value;
-			if (Date.now() >= deadline) return undefined;
+			if (performance.now() >= deadline) return undefined;
 			await sleep(POLL_INTERVAL, this.signal);
 		}
 	}
