@@ -322,7 +322,8 @@ returns and installs `window.__journey`:
 
 ```ts
 interface JourneyApi {
-	register(journeys: Journey[]): void;        // validate, compile, add to the list (replaces same id)
+	register(journeys: Journey[], opts?: { params?: Record<string, string> }): Promise<void>;
+	                                           // validate, compile, add to the list (replaces same id); params feed a resumed run
 	list(): Array<{ id: string; title?: string; version: number }>;
 	start(id: string, opts?: { mode?: 'guide' | 'preview' | 'run'; from?: number; params?: Record<string, string> }): Promise<RunResult>;
 	                                           // guide: human actor + guide presenter; preview: stepped actor (dom actions gated on Next, Enter, Space or ArrowRight) + guide presenter; run: dom actor + no presenter
@@ -357,7 +358,8 @@ Also: a delegated click listener on `[data-journey-start]` calls
 pathname equals their `autostart.route`; `once` is remembered in
 `localStorage['journey:done:<id>@<version>']`. On mount, if
 `sessionStorage['journey:progress']` exists for a listed journey, the run
-resumes at the stored index in the stored mode.
+resumes at the stored index in the stored mode, with the stored params plus
+the `params` passed to that `register` call (§5.4).
 
 Engine (`engine.ts`): `new Engine(ir, deps)` where deps are
 `{ actor, presenter, params, variant, translate, probes, pace, mask, track }`.
@@ -492,10 +494,14 @@ attribute is removed on `journey:done` for elements the engine set it on.
 
 ### 5.4 Progress
 
-`sessionStorage['journey:progress'] = JSON.stringify({ id, version, index, mode, params, variant, ir })`.
+`sessionStorage['journey:progress'] = JSON.stringify({ id, version, index, mode, params, variant, acted, navigated })`.
 Written before navigation and after each step; removed on done or abort.
-The driver stores `ir` too so a full reload can resume without the host
-resending it.
+`params` never holds a secret: keys under `var.`, keys matching the
+sensitive-name rule (`pass`, `token`, `secret`, `otp`, `card`, `cvc`, `ssn`)
+and the params of `mask: true` fills are left out. A resumed run gets them
+back from `register(journeys, { params })`; without them, the first step that
+needs one fails with `Unresolved param`. The driver resumes with the params
+the host passes to `load` again.
 
 ## 6. Editor
 
@@ -552,8 +558,9 @@ page (pick mode outlines the hovered element without scrolling, Escape
 cancels), and a value prefilled from the picked element or the current
 location. A failed row shows the engine's error text. A Values section lists
 every `var.*` parameter the draft references with password inputs; values
-live in `sessionStorage['journey:vars']` only, are passed as run params, and
-never enter the draft or the export. Preview and Run collapse the panel; collapsed, only a small pill at the
+live in `sessionStorage['journey:vars']` only, are passed as run params (and
+again to `register` when a run resumes), and never enter the draft, the
+export or the progress. Preview and Run collapse the panel; collapsed, only a small pill at the
 bottom right remains, showing `recording`, `running k/n`, `pass k/n`, `fail k/n`
 or `journey`. Expanded, the panel docks to the right or left edge with
 internal scrolling. Collapsed state and dock side persist with the draft. Journey id and title

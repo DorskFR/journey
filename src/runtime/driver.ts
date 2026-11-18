@@ -2,7 +2,7 @@ import type { Capture, Interaction, IR, PresenterName } from '../core/types.js';
 import { DriverActor, type DriverYield } from './actors.js';
 import { Engine, type Pace, type Presenter, type RunResult } from './engine.js';
 import type { Placement } from './overlay.js';
-import { clearProgress, readProgress, writeProgress } from './progress.js';
+import { clearProgress, readProgress, storedParams, writeProgress } from './progress.js';
 import type { Params, Translate } from './text.js';
 
 export interface LoadOptions {
@@ -149,9 +149,8 @@ export function createDriver(host: DriverHost): Driver {
 							version: ir.version,
 							index,
 							mode: MODE,
-							params: opts.params,
+							params: storedParams(ir, opts.params),
 							variant: opts.variant,
-							ir,
 							acted,
 							navigated,
 						});

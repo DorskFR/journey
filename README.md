@@ -175,6 +175,13 @@ mount({
 });
 ```
 
+The adapter receives the run's position, mode, variant and non-secret
+params. Params under `var.`, params whose name looks sensitive (`pass`,
+`token`, `secret`, `otp`, `card`, `cvc`, `ssn`) and the params of `mask: true`
+fills are never stored. To resume a run that needs them, pass them again:
+`register(journeys, { params })`. Otherwise the run resumes and fails at the
+first step that needs one.
+
 Bumping a journey's `version` already invalidates a stale resume and re-arms
 `autostart.once`, so a guide that gained a step comes back for everyone.
 

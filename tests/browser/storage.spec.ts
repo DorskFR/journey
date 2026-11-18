@@ -97,3 +97,71 @@ test('with no adapter the built-in keys are still used', async ({ page }) => {
 		.poll(() => page.evaluate(() => sessionStorage.getItem('journey:progress') !== null))
 		.toBe(true);
 });
+
+const SECRET: Journey = {
+	id: 'secret',
+	version: 1,
+	route: '/',
+	steps: [
+		{ id: 'one', say: { title: 'One', body: 'First.' } },
+		{
+			id: 'query',
+			target: 'start',
+			do: { kind: 'fill', value: { $param: 'var.query' }, mask: true },
+			say: { title: 'Query', body: 'Type it.' },
+		},
+	],
+};
+
+async function mountWithPageStore(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const runtime = (window as unknown as { journeyRuntime: Runtime }).journeyRuntime;
+		runtime.mount({
+			storage: {
+				get: async (key: string) => localStorage.getItem(`store:${key}`),
+				set: async (key: string, value: string) => localStorage.setItem(`store:${key}`, value),
+				remove: async (key: string) => localStorage.removeItem(`store:${key}`),
+			},
+		});
+	});
+	await waitForApi(page);
+}
+
+const storedProgress = (page: Page) =>
+	page.evaluate(() => localStorage.getItem('store:journey:progress'));
+
+test('the adapter never receives secret params, and a resume takes them from register', async ({
+	page,
+}) => {
+	await mountWithPageStore(page);
+	await page.evaluate(async (journey) => {
+		await window.__journey?.register([journey]);
+		void window.__journey?.start('secret', {
+			params: { 'var.query': 'hunter2', apiToken: 'tok-123', note: 'kept' },
+		});
+	}, SECRET);
+	await expect(card(page)).toContainText('One');
+	await card(page).locator('button.next').click();
+	await expect(card(page)).toContainText('Query');
+	await expect.poll(() => storedProgress(page)).toContain('"index":1');
+
+	const raw = (await storedProgress(page)) ?? '';
+	expect(raw).not.toContain('hunter2');
+	expect(raw).not.toContain('tok-123');
+	expect(JSON.parse(raw)).toMatchObject({ params: { note: 'kept' } });
+	expect(JSON.parse(raw)).not.toHaveProperty('ir');
+	expect(await page.evaluate(() => sessionStorage.getItem('journey:progress'))).toBeNull();
+
+	await page.reload();
+	await mountWithPageStore(page);
+	await page.evaluate(
+		(journey) => window.__journey?.register([journey], { params: { 'var.query': 'hunter2' } }),
+		SECRET,
+	);
+	await expect(card(page)).toContainText('Query');
+	expect(await page.evaluate(() => window.__journey?.current())).toEqual({
+		id: 'secret',
+		index: 1,
+	});
+	await page.evaluate(() => localStorage.clear());
+});
