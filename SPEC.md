@@ -239,6 +239,12 @@ The `locale` value is also used to resolve `Record<Locale,string>` text and is
 passed to the `translate` hook. Default variant when none declared:
 `{ viewport: 'desktop' }` with desktop = 1280x800 and mobile = 390x844 built in.
 
+An in-app start (anything but the driver) builds its variant at each start, in
+increasing precedence: `{ viewport: 'desktop' }`, the detected
+`{ viewport: matchMedia('(max-width: 767px)').matches ? 'mobile' : 'desktop', locale: <html lang> }`
+(`locale` only when `lang` is set), the mount `variant`, then
+`start(id, { variant })`. A resumed run keeps the variant it was saved with.
+
 ## 4. Target paths
 
 Grammar: `segment ( '/' segment )*`,
@@ -315,6 +321,8 @@ interface MountOptions {
 	                                           // overrides for the runtime's own text; a function is called with the current locale at show time
 	params?: Record<string, string> | ((id: string) => Record<string, string> | undefined);
 	                                           // under the params of every start, resume included; a function is called per start
+	variant?: Record<string, string> | (() => Record<string, string>);
+	                                           // over the detected variant of every start; a function is called per start
 }
 
 interface Strings {
@@ -370,7 +378,11 @@ itself.
 
 Also: a delegated click listener on `[data-journey-start]` calls
 `start(value)`. `autostart` journeys start in guide mode when the current
-pathname equals their `autostart.route`; `once` is remembered in
+location matches their `autostart.route` like a `url` expectation (below),
+checked at `register` and again after every client-side navigation (the
+Navigation API's `currententrychange`, or `pushState`, `replaceState`,
+`popstate` and `hashchange` where it is missing), unless a run is active;
+`once` is remembered in
 `localStorage['journey:done:<id>@<version>']` when the run completes or the
 user exits it, not when it fails. On mount, if
 `sessionStorage['journey:progress']` exists for a listed journey, the run

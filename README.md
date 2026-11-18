@@ -163,6 +163,21 @@ if (import.meta.env.PUBLIC_JOURNEY) {
 Start a guide with `window.__journey.start('create-note')` or a
 `data-journey-start="create-note"` attribute on any element.
 
+An `autostart` journey starts when the location matches its `autostart.route`,
+which takes the same forms as a `url` expectation (`/dashboard`, `/#notes`,
+`/items/*`). It is checked at `register` and after every client-side
+navigation (`pushState`, `replaceState`, back and forward, hash changes), so
+an SPA needs no extra wiring.
+
+`when: { viewport }` steps follow the screen the guide starts on: below 768px
+wide it runs as `mobile`, otherwise `desktop`, and `locale` comes from
+`<html lang>`. Name your own values with `mount({ variant })`, an object or a
+function read at each start:
+
+```ts
+mount({ variant: () => ({ viewport: innerWidth < 1024 ? 'tablet' : 'desktop', theme: currentTheme() }) });
+```
+
 ### Params in the app
 
 A guide asks the user for its `fill` and `select` params: the step accepts

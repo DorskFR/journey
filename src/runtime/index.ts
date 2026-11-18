@@ -3,7 +3,14 @@ import type { IR, Journey, PresenterName, Text } from '../core/types.js';
 import { VERSION } from '../version.js';
 import { domActor, humanActor, steppedActor } from './actors.js';
 import { createDriver, MODE as DRIVER_MODE, type Driver } from './driver.js';
-import { type Actor, Engine, type NavigateHook, type Presenter, type RunResult } from './engine.js';
+import {
+	type Actor,
+	Engine,
+	matchesUrl,
+	type NavigateHook,
+	type Presenter,
+	type RunResult,
+} from './engine.js';
 import { createOverlay, type Overlay, type Placement } from './overlay.js';
 import { docPresenter, guidePresenter, nonePresenter, spotPresenter } from './presenters.js';
 import { clearProgress, readProgress, storedParams, writeProgress } from './progress.js';
@@ -15,6 +22,7 @@ import {
 	resolveOne,
 	resolvePath,
 } from './resolve.js';
+import { detectVariant, watchRoute } from './route.js';
 import { defaultStorage, type JourneyStorage } from './storage.js';
 import {
 	type Localize,
@@ -40,6 +48,7 @@ export * from './overlay.js';
 export * from './presenters.js';
 export * from './progress.js';
 export * from './resolve.js';
+export * from './route.js';
 export * from './storage.js';
 export * from './strings.js';
 export * from './text.js';
@@ -61,6 +70,7 @@ export interface MountOptions {
 	presenter?: Presenter | ((name: PresenterName) => Presenter);
 	placement?: Placement;
 	params?: Params | ((id: string) => Params | undefined);
+	variant?: Record<string, string> | (() => Record<string, string>);
 }
 
 export interface StartOptions {
@@ -248,7 +258,13 @@ export function mount(input: MountOptions = {}): JourneyApi {
 		if (!ir) throw new Error(`journey "${id}" is not registered`);
 		if (engine) engine.stop();
 		const mode: Mode = opts.mode ?? 'guide';
-		const variant = { ...DEFAULT_VARIANT, ...opts.variant };
+		const given = options.variant;
+		const variant = {
+			...DEFAULT_VARIANT,
+			...detectVariant(),
+			...(typeof given === 'function' ? given() : given),
+			...opts.variant,
+		};
 		currentVariant = variant;
 		const params: Params = { ...mountParams(id), ...opts.params };
 		for (const [dim, value] of Object.entries(variant)) params[`variant.${dim}`] = value;
@@ -347,16 +363,20 @@ export function mount(input: MountOptions = {}): JourneyApi {
 		).catch(() => {});
 	}
 
-	async function autostart(): Promise<void> {
-		if (engine) return;
-		for (const ir of journeys.values()) {
-			const auto = ir.autostart;
-			if (!auto || location.pathname !== auto.route) continue;
-			if (auto.once && ((await store().get(doneKey(ir))) ?? null) !== null) continue;
+	let autostarting: Promise<void> = Promise.resolve();
+	function autostart(): Promise<void> {
+		autostarting = autostarting.then(async () => {
 			if (!mounted || engine) return;
-			void start(ir.id, { mode: 'guide' }).catch(() => {});
-			return;
-		}
+			for (const ir of journeys.values()) {
+				const auto = ir.autostart;
+				if (!auto || !matchesUrl(auto.route)) continue;
+				if (auto.once && ((await store().get(doneKey(ir))) ?? null) !== null) continue;
+				if (!mounted || engine || !matchesUrl(auto.route)) return;
+				void start(ir.id, { mode: 'guide' }).catch(() => {});
+				return;
+			}
+		});
+		return autostarting;
 	}
 
 	function register(list: Journey[], opts: RegisterOptions = {}): Promise<RegisterResult> {
@@ -449,6 +469,7 @@ export function mount(input: MountOptions = {}): JourneyApi {
 		mounted = false;
 		engine?.stop();
 		document.removeEventListener('click', onClick);
+		unwatchRoute();
 		overlay.remove();
 		void settling.finally(() => overlay.remove());
 		journeys.clear();
@@ -511,6 +532,7 @@ export function mount(input: MountOptions = {}): JourneyApi {
 	};
 
 	document.addEventListener('click', onClick);
+	const unwatchRoute = watchRoute(() => void autostart());
 
 	onReady(() => {
 		if (mounted && options.editor) window.journeyEditor?.mountEditor(api);
