@@ -129,11 +129,15 @@ test('record plumbing writes source printed in node, scrubbed HAR and opt-in sto
 			},
 		],
 	};
-	const exported = new Promise<{ files: string[]; recorded: Recorded }>((done) => {
+	const exported = new Promise<{ files: string[]; recorded: Recorded }>((done, fail) => {
 		void page.exposeBinding('__journeyExport', ({ frame }, payload: unknown) => {
 			if (!acceptsFrom(page, frame)) return;
-			const recorded = fromPayload(payload);
-			void saveExport(context, recorded, opts).then((files) => done({ files, recorded }));
+			try {
+				const recorded = fromPayload(payload);
+				saveExport(context, recorded, opts).then((files) => done({ files, recorded }), fail);
+			} catch (e) {
+				fail(e);
+			}
 		});
 	});
 	await page.goto(`${BASE}/`);
@@ -153,7 +157,7 @@ test('record plumbing writes source printed in node, scrubbed HAR and opt-in sto
 	await page.evaluate((detail) => {
 		window.dispatchEvent(
 			new CustomEvent('journey:export', {
-				detail: { ...detail, id: '../escaped', source: 'export default "evil";\n' },
+				detail: { ir: detail, id: '../escaped', source: 'export default "evil";\n' },
 			}),
 		);
 	}, ir);
