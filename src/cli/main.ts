@@ -16,7 +16,8 @@ Commands:
   compile [--public] [-o file]                       validate and print IR as JSON
   check [--strict]                                   run every journey and variant
   test [playwright args...]                          run journeys through Playwright test
-  record <url> [-o dir] [--no-har] [--headless]      record a journey in a browser
+  record <url> [-o dir] [--no-har] [--storage-state] [--headless]
+                                                     record a journey in a browser
   book [id...] [--presenter p] [--placement p] [--video] [--variant dim=value]
                                                      capture screenshots, video and a report per journey and variant
   pages                                              screenshot every configured page per variant
@@ -43,11 +44,12 @@ const COMMAND_HELP: Record<string, string> = {
   --headed        show the browser instead of running headless
   --slow-mo <ms>  pause that long before each browser operation
   extra arguments are forwarded to playwright test`,
-	record: `Usage: journey record <url> [-o dir] [--no-har] [--headless] [--config path]
+	record: `Usage: journey record <url> [-o dir] [--no-har] [--storage-state] [--headless] [--config path]
 
-  -o dir       output directory, default journeys
-  --no-har     do not record a HAR file
-  --headless   run headless and exit after the first export`,
+  -o dir           output directory, default journeys
+  --no-har         do not record a HAR file
+  --storage-state  save cookies and local storage to .journey/ (gitignored)
+  --headless       run headless and exit after the first export`,
 	book: `Usage: journey book [id...] [--presenter doc|spot|guide|none] [--placement anchored|banner] [--video] [--variant dim=value ...] [--headed] [--slow-mo ms] [--config path]
 
   id...                journeys to book, default all

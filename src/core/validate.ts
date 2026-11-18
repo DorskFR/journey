@@ -48,6 +48,8 @@ const LEVELS = new Set(['smoke', 'checked', 'visual']);
 const GUIDES = new Set(['wait-for-user', 'next']);
 const PRESENTERS = new Set(['doc', 'spot', 'guide', 'none']);
 const PACE_KEYS = new Set(['beforeAction', 'afterSettle']);
+export const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export const SENSITIVE_NAME = /pass|token|secret|otp|card|cvc|ssn/i;
 
 class Collector {
 	errors: ValidationError[] = [];
@@ -62,6 +64,14 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function isRef(v: unknown, key: '$msg' | '$param'): boolean {
 	return isRecord(v) && Object.keys(v).length === 1 && typeof v[key] === 'string';
+}
+
+function checkId(c: Collector, path: string, v: unknown, what: string): void {
+	if (!checkString(c, path, v)) return;
+	if (v === '') c.add(path, `${what} is required`);
+	else if (!ID_PATTERN.test(v as string)) {
+		c.add(path, `${what} ${JSON.stringify(v)} must match ${ID_PATTERN.source}`);
+	}
 }
 
 function checkString(c: Collector, path: string, v: unknown): boolean {
@@ -261,7 +271,7 @@ function checkStringRecord(c: Collector, path: string, v: unknown, allowParam = 
 
 function checkCapture(c: Collector, path: string, v: unknown): void {
 	if (typeof v === 'string') {
-		if (v === '') c.add(path, 'capture name must not be empty');
+		checkId(c, path, v, 'capture name');
 		return;
 	}
 	if (!isRecord(v)) {
@@ -269,7 +279,7 @@ function checkCapture(c: Collector, path: string, v: unknown): void {
 		return;
 	}
 	checkKeys(c, path, v, new Set(['name', 'video', 'crop']));
-	checkString(c, `${path}.name`, v.name);
+	checkId(c, `${path}.name`, v.name, 'capture name');
 	if ('video' in v && typeof v.video !== 'boolean') c.add(`${path}.video`, 'expected a boolean');
 	if ('crop' in v && v.crop !== 'none' && v.crop !== 'target') checkPath(c, `${path}.crop`, v.crop);
 }
@@ -293,7 +303,7 @@ function checkStep(c: Collector, path: string, v: unknown): void {
 		return;
 	}
 	checkKeys(c, path, v, STEP_KEYS);
-	if (checkString(c, `${path}.id`, v.id) && v.id === '') c.add(`${path}.id`, 'step id is required');
+	checkId(c, `${path}.id`, v.id, 'step id');
 	if ('route' in v) checkString(c, `${path}.route`, v.route);
 	if ('target' in v) checkTarget(c, `${path}.target`, v.target);
 	if ('params' in v) checkStringRecord(c, `${path}.params`, v.params, true);
@@ -346,7 +356,7 @@ export function validate(journey: unknown): ValidationResult {
 	checkNoFunctions(c, '', journey);
 	if (c.errors.length > 0) return { ok: false, errors: c.errors.map(stripLeadingDot) };
 	checkKeys(c, '', journey, JOURNEY_KEYS);
-	if (checkString(c, 'id', journey.id) && journey.id === '') c.add('id', 'journey id is required');
+	checkId(c, 'id', journey.id, 'journey id');
 	if ('version' in journey && !Number.isInteger(journey.version))
 		c.add('version', 'expected an integer');
 	if ('title' in journey) checkText(c, 'title', journey.title);
@@ -359,7 +369,7 @@ export function validate(journey: unknown): ValidationResult {
 				if (!Array.isArray(values)) c.add(`variants.${dim}`, 'expected an array of strings');
 				else {
 					values.forEach((s, i) => {
-						checkString(c, `variants.${dim}[${i}]`, s);
+						checkId(c, `variants.${dim}[${i}]`, s, 'variant value');
 					});
 				}
 			}

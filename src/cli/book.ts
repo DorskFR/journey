@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { type Browser, chromium } from '@playwright/test';
 import type { Capture, IR } from '../core/types.js';
 import { captureStep, startVideo } from '../playwright/capture.js';
@@ -76,6 +76,17 @@ export function wantsVideo(ir: IR, flag: boolean): boolean {
 
 export function captureFile(index: number, name: string): string {
 	return `${String(index + 1).padStart(2, '0')}-${name}.png`;
+}
+
+export function variantDir(out: string, id: string, key: string): string {
+	const root = resolve(out);
+	const dir = resolve(root, id, key);
+	const rel = relative(root, dir);
+	const parts = rel.split(sep);
+	if (isAbsolute(rel) || parts.length !== 2 || parts.includes('..')) {
+		throw new Error(`journey book: refusing to write ${dir}, outside ${root}/<id>/<variant>`);
+	}
+	return dir;
 }
 
 export function selectJourneys(journeys: LoadedJourney[], ids: string[]): LoadedJourney[] {
@@ -219,7 +230,7 @@ export async function runBook(argv: Argv): Promise<number> {
 			const labels: Record<string, string> = {};
 			for (const variant of variants) {
 				const key = variantKey(variant);
-				const dir = join(journeyDir, key);
+				const dir = variantDir(out, ir.id, key);
 				const result = await bookVariant(browser, loaded, ir, variant, dir, opts);
 				const title = resolveText(ir.title, undefined, variant.locale) ?? ir.id;
 				const manifest: Manifest = {

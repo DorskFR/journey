@@ -125,3 +125,34 @@ test('rejects a bad per-step presenter and pace', () => {
 		'steps[3].pace',
 	]);
 });
+
+test('rejects ids, capture names and variant values that are not a safe name', () => {
+	const j = {
+		id: '..',
+		variants: { theme: ['dark', '../x'] },
+		steps: [
+			{ id: 'a"b' },
+			{ id: 'ok', capture: '../../../x' },
+			{ id: 'ok2', capture: { name: 'has space' } },
+			{ id: '.hidden' },
+			{ id: 'a/b' },
+		],
+	};
+	expect(paths(j)).toEqual([
+		'id',
+		'variants.theme[1]',
+		'steps[0].id',
+		'steps[1].capture',
+		'steps[2].capture.name',
+		'steps[3].id',
+		'steps[4].id',
+	]);
+	expect(validate(j).errors[0]?.message).toBe(
+		'journey id ".." must match ^[A-Za-z0-9][A-Za-z0-9._-]*$',
+	);
+});
+
+test('accepts ids with dots, dashes, underscores and digits', () => {
+	const j = { id: 'v1.2_create-note', steps: [{ id: '2fa_code.next', capture: 'Step-1.a' }] };
+	expect(validate(j)).toEqual({ ok: true, errors: [] });
+});

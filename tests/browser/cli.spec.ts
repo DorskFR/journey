@@ -7,9 +7,17 @@ import { expect, test } from '@playwright/test';
 import demoConfig from '../../demo/journey.config.js';
 import { variantKey, variantMatrix } from '../../src/cli/config.js';
 import { hasFfmpeg } from '../../src/cli/media.js';
-import { forwardExportScript, mountEditorIn, saveExport } from '../../src/cli/record.js';
+import {
+	acceptsFrom,
+	finishHar,
+	forwardExportScript,
+	fromPayload,
+	mountEditorIn,
+	type Recorded,
+	saveExport,
+} from '../../src/cli/record.js';
 import type { Manifest } from '../../src/cli/report.js';
-import type { IR } from '../../src/index.js';
+import { compile, type IR, print } from '../../src/index.js';
 import { BASE, createNoteIR, RUNTIME_INIT, settingsThemeIR } from './helpers.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -91,41 +99,80 @@ test('test spawns playwright with the generated config and exits 0', async () =>
 	expect(run.stdout).toContain('3 passed');
 });
 
-test('record plumbing forwards journey:export and writes source, storage and HAR', async ({
+test('record plumbing writes source printed in node, scrubbed HAR and opt-in storage state', async ({
 	browser,
 }) => {
 	const dir = mkdtempSync(join(tmpdir(), 'journey-record-'));
+	const opts = {
+		url: BASE,
+		dir,
+		secrets: join(dir, '.journey'),
+		har: true,
+		storageState: true,
+		headless: true,
+	};
 	const har = join(dir, 'fixtures', 'recording.har');
 	const context = await browser.newContext({ recordHar: { path: har, mode: 'minimal' } });
 	await context.addInitScript(RUNTIME_INIT);
 	await context.addInitScript(forwardExportScript());
 	const page = await context.newPage();
-	const exported = new Promise<string[]>((done) => {
-		void page.exposeFunction('__journeyExport', (payload: { id: string; source: string }) =>
-			saveExport(context, payload, { url: BASE, dir, har: true, headless: true }).then(done),
-		);
+	const ir: IR = {
+		...createNoteIR,
+		id: 'recorded',
+		steps: [
+			{
+				id: 'token',
+				target: 'token',
+				do: { kind: 'fill', value: { $param: 'var.token' }, mask: true },
+				guide: 'wait-for-user',
+				timeout: 10000,
+			},
+		],
+	};
+	const exported = new Promise<{ files: string[]; recorded: Recorded }>((done) => {
+		void page.exposeBinding('__journeyExport', ({ frame }, payload: unknown) => {
+			if (!acceptsFrom(page, frame)) return;
+			const recorded = fromPayload(payload);
+			void saveExport(context, recorded, opts).then((files) => done({ files, recorded }));
+		});
 	});
 	await page.goto(`${BASE}/`);
 	await mountEditorIn(page);
 	expect(await page.evaluate(() => window.__journey?.options.editor)).toBe(true);
-	await page.evaluate(() => {
+	await page.evaluate(async (base) => {
 		localStorage.setItem('demo-marker', '1');
+		await fetch(`${base}/login`, {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/x-www-form-urlencoded',
+				authorization: 'Bearer s3cr3t-h',
+			},
+			body: 'user=me&token=s3cr3t-b',
+		}).catch(() => {});
+	}, BASE);
+	await page.evaluate((detail) => {
 		window.dispatchEvent(
 			new CustomEvent('journey:export', {
-				detail: { id: 'recorded', source: 'export default {};\n' },
+				detail: { ...detail, id: '../escaped', source: 'export default "evil";\n' },
 			}),
 		);
-	});
-	const files = await exported;
+	}, ir);
+	const { files, recorded } = await exported;
 	await context.close();
 	expect(files).toEqual([
 		join(dir, 'recorded.journey.ts'),
-		join(dir, 'fixtures', 'recorded.storage.json'),
+		join(dir, '.journey', 'recorded.storage.json'),
 		join(dir, 'fixtures', 'recorded.har'),
 	]);
-	expect(readFileSync(files[0] as string, 'utf8')).toBe('export default {};\n');
+	expect(readFileSync(files[0] as string, 'utf8')).toBe(print(compile(ir)));
 	expect(readFileSync(files[1] as string, 'utf8')).toContain('demo-marker');
-	expect(existsSync(har)).toBe(true);
+	expect(readFileSync(join(dir, '.journey', '.gitignore'), 'utf8')).toBe('*\n');
+	expect(finishHar(har, recorded, opts)).toBe(files[2]);
+	const written = readFileSync(files[2] as string, 'utf8');
+	expect(written).toContain('/login');
+	expect(written).not.toContain('s3cr3t');
+	expect(existsSync(join(dir, '..', 'escaped.journey.ts'))).toBe(false);
+	rmSync(dir, { recursive: true, force: true });
 });
 
 const out = join(root, 'demo/out');
