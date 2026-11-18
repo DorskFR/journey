@@ -322,7 +322,8 @@ returns and installs `window.__journey`:
 
 ```ts
 interface JourneyApi {
-	register(journeys: Journey[]): void;        // validate, compile, add to the list (replaces same id)
+	register(journeys: Journey[], opts?: { params?: Record<string, string> }): Promise<void>;
+	                                           // validate, compile, add to the list (replaces same id); params feed a resumed run
 	list(): Array<{ id: string; title?: string; version: number }>;
 	start(id: string, opts?: { mode?: 'guide' | 'preview' | 'run'; from?: number; params?: Record<string, string> }): Promise<RunResult>;
 	                                           // guide: human actor + guide presenter; preview: stepped actor (dom actions gated on Next, Enter, Space or ArrowRight) + guide presenter; run: dom actor + no presenter
@@ -357,7 +358,8 @@ Also: a delegated click listener on `[data-journey-start]` calls
 pathname equals their `autostart.route`; `once` is remembered in
 `localStorage['journey:done:<id>@<version>']`. On mount, if
 `sessionStorage['journey:progress']` exists for a listed journey, the run
-resumes at the stored index in the stored mode.
+resumes at the stored index in the stored mode, with the stored params plus
+the `params` passed to that `register` call (§5.4).
 
 Engine (`engine.ts`): `new Engine(ir, deps)` where deps are
 `{ actor, presenter, params, variant, translate, probes, pace, mask, track }`.
@@ -388,7 +390,7 @@ Per step:
    hidden first. The human and stepped actors ignore `step.presenter` and
    `step.pace`: the presenter is the only way through the run for a person, so
    a step may not take it away or stall them.
-6. Apply masks (section 5.3), wait `step.pace.beforeAction ?? pace.beforeAction`,
+6. Apply masks (section 5.3; they stay live until the run ends), wait `step.pace.beforeAction ?? pace.beforeAction`,
    move the cursor to the element if the presenter has one. `moveCursor`
    resolves on `transitionend`, on `transitioncancel`, or on a timer just past
    the transition it asked for: a transition that never starts fires neither
@@ -487,15 +489,26 @@ Colors: accent `#ffd166`, text `#111`, card background `#fff`, dim
 
 A stylesheet rule in the document head: `[data-journey-mask]{filter:blur(8px)!important}`.
 In book mode (`mask: true` in deps) the engine resolves `journey.mask` plus
-config masks at every step and sets `data-journey-mask` on the matches. The
-attribute is removed on `journey:done` for elements the engine set it on.
+config masks with the step's params and sets `data-journey-mask` on the
+matches, before the action and again before `step:pass`. A `mask: true` fill
+run by any actor but the human one masks its target before the value is
+typed, for the rest of the run, and `step:acted` reports its value as `***`.
+From the first mask on, a MutationObserver re-applies every mask whenever the
+DOM changes; its callbacks run before the next paint, so content the action
+inserts, re-renders or strips of the attribute is masked in every screenshot
+and video frame. Outside book mode the attribute is removed when the run ends;
+in book mode it stays, because the video records until the page closes.
 
 ### 5.4 Progress
 
-`sessionStorage['journey:progress'] = JSON.stringify({ id, version, index, mode, params, variant, ir })`.
+`sessionStorage['journey:progress'] = JSON.stringify({ id, version, index, mode, params, variant, acted, navigated })`.
 Written before navigation and after each step; removed on done or abort.
-The driver stores `ir` too so a full reload can resume without the host
-resending it.
+`params` never holds a secret: keys under `var.`, keys matching the
+sensitive-name rule (`pass`, `token`, `secret`, `otp`, `card`, `cvc`, `ssn`)
+and the params of `mask: true` fills are left out. A resumed run gets them
+back from `register(journeys, { params })`; without them, the first step that
+needs one fails with `Unresolved param`. The driver resumes with the params
+the host passes to `load` again.
 
 ## 6. Editor
 
@@ -552,8 +565,9 @@ page (pick mode outlines the hovered element without scrolling, Escape
 cancels), and a value prefilled from the picked element or the current
 location. A failed row shows the engine's error text. A Values section lists
 every `var.*` parameter the draft references with password inputs; values
-live in `sessionStorage['journey:vars']` only, are passed as run params, and
-never enter the draft or the export. Preview and Run collapse the panel; collapsed, only a small pill at the
+live in `sessionStorage['journey:vars']` only, are passed as run params (and
+again to `register` when a run resumes), and never enter the draft, the
+export or the progress. Preview and Run collapse the panel; collapsed, only a small pill at the
 bottom right remains, showing `recording`, `running k/n`, `pass k/n`, `fail k/n`
 or `journey`. Expanded, the panel docks to the right or left edge with
 internal scrolling. Collapsed state and dock side persist with the draft. Journey id and title
@@ -826,6 +840,10 @@ Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
   `settings.html` and back, captures are reported in order, a journey with
   a wrong expectation fails with the step id, masks are applied in book mode
   (the masked paragraph has the attribute).
+- `mask.spec.ts`: content a click inserts and a node re-rendered without the
+  attribute are masked in their first frame and at capture time; a masked
+  fill's field is masked when its value is typed, still holds the real value,
+  and stays masked after being replaced.
 - `editor.spec.ts`: mount with editor, start recording, perform the
   create-note flow with Playwright clicks and typing, stop; the draft has the
   expected steps with `stable` targets and correct actions; suggestions

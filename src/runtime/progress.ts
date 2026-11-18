@@ -1,4 +1,5 @@
 import type { IR } from '../core/types.js';
+import { SENSITIVE_NAME } from '../core/validate.js';
 import { defaultStorage, type JourneyStorage } from './storage.js';
 
 export const PROGRESS_KEY = 'journey:progress';
@@ -10,9 +11,32 @@ export interface Progress {
 	mode: string;
 	params: Record<string, string>;
 	variant: Record<string, string>;
-	ir: IR;
 	acted?: boolean;
 	navigated?: boolean;
+}
+
+function maskedParams(ir: IR): Set<string> {
+	const names = new Set<string>();
+	for (const step of ir.steps) {
+		const action = step.do;
+		if (action.kind === 'fill' && action.mask === true && typeof action.value === 'object') {
+			names.add(action.value.$param);
+		}
+	}
+	return names;
+}
+
+export function storedParams(
+	ir: IR,
+	params: Record<string, string> | undefined,
+): Record<string, string> {
+	const masked = maskedParams(ir);
+	const out: Record<string, string> = {};
+	for (const [key, value] of Object.entries(params ?? {})) {
+		if (key.startsWith('var.') || SENSITIVE_NAME.test(key) || masked.has(key)) continue;
+		out[key] = value;
+	}
+	return out;
 }
 
 export async function readProgress(

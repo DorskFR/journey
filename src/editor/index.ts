@@ -248,7 +248,7 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		if (!built) return;
 		running = true;
 		collapsed = true;
-		await api.register([built]);
+		await api.register([built], { params: varParams(vars) });
 		attach(api.engine());
 		render();
 	};

@@ -6,7 +6,7 @@ import { createDriver, MODE as DRIVER_MODE, type Driver } from './driver.js';
 import { type Actor, Engine, type NavigateHook, type Presenter, type RunResult } from './engine.js';
 import { createOverlay, type Overlay, type Placement } from './overlay.js';
 import { docPresenter, guidePresenter, nonePresenter, spotPresenter } from './presenters.js';
-import { clearProgress, readProgress, writeProgress } from './progress.js';
+import { clearProgress, readProgress, storedParams, writeProgress } from './progress.js';
 import {
 	accessibleName,
 	computedRole,
@@ -62,6 +62,10 @@ export interface StartOptions {
 	variant?: Record<string, string>;
 }
 
+export interface RegisterOptions {
+	params?: Params;
+}
+
 export const resolve = {
 	resolveOne,
 	resolveAll,
@@ -74,7 +78,7 @@ export const resolve = {
 
 export interface JourneyApi {
 	resolve: typeof resolve;
-	register(journeys: Journey[]): Promise<void>;
+	register(journeys: Journey[], opts?: RegisterOptions): Promise<void>;
 	list(): Array<{ id: string; title?: string; version: number }>;
 	start(id: string, opts?: StartOptions): Promise<RunResult>;
 	stop(): void;
@@ -187,6 +191,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		currentVariant = variant;
 		const params: Params = { ...opts.params };
 		for (const [dim, value] of Object.entries(variant)) params[`variant.${dim}`] = value;
+		const stored = storedParams(ir, params);
 		const run = new Engine(ir, {
 			actor:
 				mode === 'guide'
@@ -210,9 +215,8 @@ export function mount(options: MountOptions = {}): JourneyApi {
 							version: ir.version,
 							index,
 							mode,
-							params,
+							params: stored,
 							variant,
-							ir,
 							acted,
 							navigated,
 						},
@@ -241,7 +245,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		return startRun(id, opts, { acted: false, navigated: false });
 	}
 
-	async function resume(): Promise<void> {
+	async function resume(supplied: Params | undefined): Promise<void> {
 		const progress = await readProgress(store);
 		if (!progress || progress.mode === DRIVER_MODE || engine) return;
 		const ir = journeys.get(progress.id);
@@ -253,7 +257,12 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		}
 		void startRun(
 			progress.id,
-			{ mode: progress.mode as Mode, from, params: progress.params, variant: progress.variant },
+			{
+				mode: progress.mode as Mode,
+				from,
+				params: { ...progress.params, ...supplied },
+				variant: progress.variant,
+			},
 			{ acted: progress.acted === true, navigated: progress.navigated === true },
 		).catch(() => {});
 	}
@@ -269,7 +278,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		}
 	}
 
-	function register(list: Journey[]): Promise<void> {
+	function register(list: Journey[], opts: RegisterOptions = {}): Promise<void> {
 		for (const journey of list) {
 			const ir = compile(journey, { public: true });
 			const dropped = dropLine(ir.id, publicDrops(journey));
@@ -279,7 +288,7 @@ export function mount(options: MountOptions = {}): JourneyApi {
 		return new Promise<void>((settled) => {
 			onReady(() => {
 				void (async () => {
-					await resume();
+					await resume(opts.params);
 					await autostart();
 					renderLauncher();
 					settled();
