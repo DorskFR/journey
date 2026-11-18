@@ -84,6 +84,7 @@ test('the value a user types is the param for the steps after it', async ({ page
 	await expect(card(page)).toContainText('Open');
 	await page.locator('[data-journey="start"]').click();
 	await expect(card(page)).toContainText('Step 2 of 3');
+	await expect(page.locator('journey-overlay .spot')).toBeVisible();
 	await page.locator('[data-journey="search"]').fill('milk');
 	await expect(card(page)).toContainText('Echo');
 	await card(page).locator('button.next').click();
