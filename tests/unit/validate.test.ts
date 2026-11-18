@@ -68,6 +68,20 @@ test('rejects bad target syntax', () => {
 	expect(result.errors[0]?.message).toContain('notes//new');
 });
 
+test('a path ending in >> is accepted only as a locator scope', () => {
+	const j = {
+		id: 'j',
+		mask: ['card>>'],
+		steps: [
+			{ id: 'a', target: 'card>>', do: { kind: 'click' } },
+			{ id: 'b', target: 'card>>ok', do: { kind: 'click' } },
+			{ id: 'c', target: { role: 'button', within: 'card>>' }, do: { kind: 'click' } },
+			{ id: 'd', target: 'ok', capture: { name: 'shot', crop: 'card>>' } },
+		],
+	};
+	expect(paths(j)).toEqual(['mask[0]', 'steps[0].target', 'steps[3].capture.crop']);
+});
+
 test('rejects unknown expectation shapes', () => {
 	const j = {
 		id: 'j',

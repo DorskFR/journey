@@ -247,15 +247,17 @@ increasing precedence: `{ viewport: 'desktop' }`, the detected
 
 ## 4. Target paths
 
-Grammar: `segment ( '/' segment )*`,
+Grammar: `segment ( ( '/' | '>>' ) segment )* '>>'?`,
 `segment = name ( '[' key ']' )? ( '[' '#' index ']' )?`,
 `name = [A-Za-z0-9_.:-]+`, `key = [^\]]+` where a key of the form `{p}` is a
 param reference resolved from `step.params[p]`, and `index` is an integer.
 A key may not begin with `#`; that spelling is reserved for the index, so a
 malformed one such as `card[#a]` is an error rather than a literal key.
-Whitespace around `/` is ignored. `parseTarget(path)` returns
-`{ segments: [{ name, key?, param?, index? }] }` or throws with a message that
-includes the offending path.
+Whitespace around `/` and `>>` is ignored; `>>` inside a key is part of the
+key. `parseTarget(path)` returns
+`{ segments: [{ name, key?, param?, index?, into? }] }` or throws with a
+message that includes the offending path. `into` marks a segment followed by
+`>>`. A path ending in `>>` is only valid as a locator's `within`.
 
 Resolution (`resolveAll(target, params, root = document)`):
 
@@ -265,6 +267,11 @@ Resolution (`resolveAll(target, params, root = document)`):
   segment search within each previously matched element. Elements matching
   a segment must not be nested inside another match of the same segment
   (take the outermost).
+- `a>>b`: `b` is searched inside the open shadow root of each match of `a`,
+  or inside its document when `a` is a same-origin `<iframe>`. `/` never
+  crosses into a shadow root or a frame, so paths without `>>` resolve as if
+  neither existed. Closed shadow roots and cross-origin frames yield no match.
+  `within: 'a>>'` scopes a locator to that shadow root or frame document.
 - Index segment: after the name and any key narrow the matches, `[#i]` keeps
   the single element at position `i` among the **visible** ones, in document
   order and 0-based, counting from the end when `i` is negative. Out of range
@@ -626,11 +633,16 @@ element that is a button, link, input, select, textarea, `[role]`,
 ancestors carry `data-journey`, build the path from the chain of
 `data-journey` ancestors (outermost first) using `data-journey-key` values
 where present, and verify with `resolveOne` that it is unique; health
-`stable`. Otherwise try in order `testid`, `label`, `role`+`name`, `text`,
-each verified unique with `resolveOne` (optionally scoped with `within` to
-the nearest `data-journey` ancestor); health `fallback`. Otherwise a `css`
-path of tag and `:nth-of-type` from the nearest id or `data-journey`
-ancestor; health `fragile`.
+`stable`. The chain climbs out of a shadow root to its host and out of a
+same-origin frame to its `<iframe>`, joining those two with `>>`, as long as
+that host or iframe carries `data-journey`. Otherwise try in order `testid`,
+`label`, `role`+`name`, `text`, each verified unique with `resolveOne`
+(optionally scoped with `within` to the nearest `data-journey` ancestor, or
+`host>>` for an element directly inside an annotated host's shadow root or
+frame); health `fallback`. Otherwise a `css` path of tag and `:nth-of-type`
+from the nearest id or `data-journey` ancestor, scoped the same way; health
+`fragile`. The recorder reads the event's real target through shadow roots
+(`composedPath`) and listens inside same-origin frames too.
 
 Sensitive values: `input[type=password]`, `autocomplete` containing
 `one-time-code` or `cc-`, or `name`/`id`/`autocomplete` matching

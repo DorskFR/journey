@@ -79,6 +79,14 @@ user-agnostic — it clicks through to whatever the reader actually has,
 instead of naming an entity only your fixtures contain — and an indexed path
 is still a path, so `journey check --strict` accepts it.
 
+`>>` crosses into an open shadow root or a same-origin iframe:
+`settings/color-picker>>swatch[red]` is a `data-journey="swatch"` element
+inside the shadow root of `<color-picker data-journey="color-picker">`, and
+`checkout/payment>>card-number` one inside `<iframe data-journey="payment">`.
+A locator scopes to the same place with `within: 'checkout/payment>>'`. `/`
+alone never crosses, so annotate the host or the iframe to reach inside it.
+Closed shadow roots and cross-origin frames can't be targeted.
+
 Without attributes the recorder falls back to accessible role and name,
 labels, test ids and text, and `journey check --strict` tells you which
 targets still need one.

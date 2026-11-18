@@ -1,4 +1,4 @@
-import { parseTarget } from './target.js';
+import { endsInside, parseTarget } from './target.js';
 import type { Journey, ValidationError, ValidationResult } from './types.js';
 
 const JOURNEY_KEYS = new Set([
@@ -120,10 +120,12 @@ function checkText(c: Collector, path: string, v: unknown): void {
 	c.add(path, `expected text (string, msg() or locale map), got ${describe(v)}`);
 }
 
-function checkPath(c: Collector, path: string, v: unknown): void {
+function checkPath(c: Collector, path: string, v: unknown, scope = false): void {
 	if (!checkString(c, path, v)) return;
 	try {
-		parseTarget(v as string);
+		if (!scope && endsInside(parseTarget(v as string))) {
+			c.add(path, `target path ${JSON.stringify(v)} ends with ">>"; only a locator's within may`);
+		}
 	} catch (e) {
 		c.add(path, (e as Error).message);
 	}
@@ -145,7 +147,7 @@ function checkTarget(c: Collector, path: string, v: unknown): void {
 	for (const k of ['role', 'name', 'label', 'text', 'testid', 'css']) {
 		if (k in v) checkString(c, `${path}.${k}`, v[k]);
 	}
-	if ('within' in v) checkPath(c, `${path}.within`, v.within);
+	if ('within' in v) checkPath(c, `${path}.within`, v.within, true);
 	if ('nth' in v && !Number.isInteger(v.nth)) c.add(`${path}.nth`, 'expected an integer');
 }
 

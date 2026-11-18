@@ -1,4 +1,4 @@
-import { formatTarget, parseTarget } from '../core/target.js';
+import { endsInside, formatTarget, parseTarget } from '../core/target.js';
 import type { Locator, Target, TargetPath } from '../core/types.js';
 import type { Params } from './text.js';
 
@@ -82,6 +82,13 @@ export function ambiguityHint(target: Target): string {
 	return ` (add a key or an index, e.g. "${formatTarget({ segments: [{ ...last, index: 0 }] })}")`;
 }
 
+function idScope(el: Element): Document | ShadowRoot {
+	const root = el.getRootNode() as Partial<Document | ShadowRoot>;
+	return typeof root.getElementById === 'function'
+		? (root as Document | ShadowRoot)
+		: el.ownerDocument;
+}
+
 function collapse(text: string | null | undefined): string {
 	return (text ?? '').replace(/\s+/g, ' ').trim();
 }
@@ -119,7 +126,7 @@ export function accessibleName(el: Element): string {
 	if (labelledBy) {
 		const text = labelledBy
 			.split(/\s+/)
-			.map((id) => collapse(el.ownerDocument.getElementById(id)?.textContent))
+			.map((id) => collapse(idScope(el).getElementById(id)?.textContent))
 			.filter((t) => t !== '')
 			.join(' ');
 		if (text !== '') return text;
@@ -143,7 +150,8 @@ export function accessibleName(el: Element): string {
 export function isVisible(el: Element): boolean {
 	const rect = el.getBoundingClientRect();
 	if (rect.width === 0 && rect.height === 0) return false;
-	return getComputedStyle(el).visibility !== 'hidden';
+	const view = el.ownerDocument.defaultView ?? window;
+	return view.getComputedStyle(el).visibility !== 'hidden';
 }
 
 function outermost(els: Element[]): Element[] {
@@ -158,7 +166,18 @@ function attr(name: string, value: string): string {
 	return `[${name}="${CSS.escape(value)}"]`;
 }
 
-export function resolvePath(path: TargetPath, params: Params, root: ParentNode): Element[] {
+function inside(el: Element): ParentNode | null {
+	if (el.shadowRoot) return el.shadowRoot;
+	const tag = el.localName;
+	if (tag !== 'iframe' && tag !== 'frame') return null;
+	try {
+		return (el as HTMLIFrameElement).contentDocument;
+	} catch {
+		return null;
+	}
+}
+
+function resolveScopes(path: TargetPath, params: Params, root: ParentNode): ParentNode[] {
 	const { segments } = parseTarget(path);
 	let scopes: ParentNode[] = [root];
 	for (const segment of segments) {
@@ -181,9 +200,21 @@ export function resolvePath(path: TargetPath, params: Params, root: ParentNode):
 			const picked = visible.at(segment.index);
 			matched = picked === undefined ? [] : [picked];
 		}
-		scopes = matched;
+		scopes = segment.into
+			? matched.flatMap((el) => {
+					const inner = inside(el);
+					return inner === null ? [] : [inner];
+				})
+			: matched;
 	}
-	return scopes as Element[];
+	return scopes;
+}
+
+export function resolvePath(path: TargetPath, params: Params, root: ParentNode): Element[] {
+	if (endsInside(parseTarget(path))) {
+		throw new Error(`Target "${path}" ends with ">>"; only a locator's within may`);
+	}
+	return resolveScopes(path, params, root) as Element[];
 }
 
 function labelMatches(el: Element, label: string): boolean {
@@ -199,7 +230,7 @@ function textMatches(el: Element, text: string): boolean {
 
 export function resolveLocator(locator: Locator, params: Params, root: ParentNode): Element[] {
 	const scopes: ParentNode[] =
-		locator.within !== undefined ? resolvePath(locator.within, params, root) : [root];
+		locator.within !== undefined ? resolveScopes(locator.within, params, root) : [root];
 	const query = (selector: string): Element[] =>
 		unique(scopes.flatMap((scope) => Array.from(scope.querySelectorAll(selector))));
 	let els: Element[] | null = null;
