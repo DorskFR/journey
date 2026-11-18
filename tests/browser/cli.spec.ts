@@ -162,7 +162,7 @@ test('record plumbing writes source printed in node, scrubbed HAR and opt-in sto
 		storageState: true,
 		headless: true,
 	};
-	const har = join(dir, 'fixtures', 'recording.har');
+	const har = join(dir, '.journey', 'recording.har');
 	const context = await browser.newContext({ recordHar: { path: har, mode: 'minimal' } });
 	await context.addInitScript(RUNTIME_INIT);
 	await context.addInitScript(forwardExportScript());
@@ -217,13 +217,14 @@ test('record plumbing writes source printed in node, scrubbed HAR and opt-in sto
 	expect(files).toEqual([
 		join(dir, 'recorded.journey.ts'),
 		join(dir, '.journey', 'recorded.storage.json'),
-		join(dir, 'fixtures', 'recorded.har'),
 	]);
 	expect(readFileSync(files[0] as string, 'utf8')).toBe(print(compile(ir)));
 	expect(readFileSync(files[1] as string, 'utf8')).toContain('demo-marker');
 	expect(readFileSync(join(dir, '.journey', '.gitignore'), 'utf8')).toBe('*\n');
-	expect(finishHar(har, recorded, opts)).toBe(files[2]);
-	const written = readFileSync(files[2] as string, 'utf8');
+	const hars = finishHar(har, [recorded], opts);
+	expect(hars).toEqual([join(dir, 'fixtures', 'recorded.har')]);
+	expect(existsSync(har)).toBe(false);
+	const written = readFileSync(hars[0] as string, 'utf8');
 	expect(written).toContain('/login');
 	expect(written).not.toContain('s3cr3t');
 	expect(existsSync(join(dir, '..', 'escaped.journey.ts'))).toBe(false);
@@ -326,6 +327,19 @@ test.describe('book and pages', () => {
 	});
 
 	test('a --variant that names no variant exits 1 with the valid values', async () => {
+		const narrow = await journey([
+			'check',
+			'settings-theme',
+			'--variant',
+			'viewport=mobile',
+			'--config',
+			config,
+		]);
+		expect(narrow.code).toBe(1);
+		expect(narrow.stderr).toContain(
+			'journey check: unknown viewport "mobile", expected one of: desktop',
+		);
+
 		const typo = await journey([
 			'book',
 			'create-note',
@@ -522,7 +536,101 @@ test('a positional path passes --strict where the same target as a locator does 
 
 		const loose = await journey(['check', '--config', configFor('locator'), '--strict']);
 		expect(loose.code).toBe(1);
-		expect(loose.stdout).toMatch(/^✗ locator .*fallback 0 fragile 1/m);
+		expect(loose.stdout).toMatch(/^✗ locator .*fallback 0 fragile 1 strict: 1 unstable target$/m);
+		expect(loose.stdout).toContain(
+			'\n  step pick: fragile {"within":"notes/note[#0]","css":"[data-journey=\\"delete\\"]"}\n',
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('check runs only the journeys and variants asked for, and --json reports them for CI', async () => {
+	const json = await journey([
+		'check',
+		'create-note',
+		'--variant',
+		'viewport=mobile',
+		'--json',
+		'--config',
+		config,
+	]);
+	expect(json.code, json.stderr).toBe(0);
+	const report = JSON.parse(json.stdout);
+	expect(report).toMatchObject({ ok: true, strict: false, errors: [] });
+	expect(report.journeys).toHaveLength(1);
+	expect(report.journeys[0]).toMatchObject({
+		id: 'create-note',
+		file: 'demo/journeys/create-note.journey.ts',
+		ok: true,
+		targets: { fallback: 0, fragile: 0 },
+		unstable: [],
+		runs: [{ variant: { viewport: 'mobile', theme: 'light' }, ok: true, failures: [] }],
+	});
+
+	const unknown = await journey(['check', 'nope', '--json', '--config', config]);
+	expect(unknown.code).toBe(1);
+	expect(JSON.parse(unknown.stdout)).toEqual({
+		ok: false,
+		strict: false,
+		errors: [
+			'journey check: "nope" not among the configured journeys: create-note, settings-theme',
+		],
+		journeys: [],
+	});
+
+	const narrow = await journey([
+		'check',
+		'settings-theme',
+		'--variant',
+		'viewport=mobile',
+		'--config',
+		config,
+	]);
+	expect(narrow.code).toBe(1);
+	expect(narrow.stderr).toContain(
+		'journey check: unknown viewport "mobile", expected one of: desktop',
+	);
+
+	const typo = await journey(['check', '--strcit', '--config', config]);
+	expect(typo.code).toBe(1);
+	expect(typo.stderr).toContain('journey check: unknown option --strcit');
+	expect(typo.stdout).toBe('');
+});
+
+test('record reads the config, stages the raw HAR in .journey and cleans it up on Ctrl-C', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'journey-rec-'));
+	try {
+		writeFileSync(
+			join(dir, 'journey.config.js'),
+			`export default { app: { url: '${BASE}' }, journeys: 'flows/*.journey.ts' };\n`,
+		);
+		const child = spawn(
+			process.execPath,
+			[cli, 'record', '--headless', '--config', join(dir, 'journey.config.js')],
+			{ cwd: root, env: cleanEnv() },
+		);
+		let stdout = '';
+		let stderr = '';
+		child.stderr.on('data', (chunk: Buffer) => {
+			stderr += chunk.toString();
+		});
+		const code = new Promise<number>((done) => child.on('close', (c) => done(c ?? 1)));
+		await new Promise<void>((done, fail) => {
+			child.stdout.on('data', (chunk: Buffer) => {
+				stdout += chunk.toString();
+				if (stdout.includes('recording;')) done();
+			});
+			child.on('close', () => fail(new Error(`record exited early: ${stdout}${stderr}`)));
+		});
+		expect(existsSync(join(dir, '.journey', '.gitignore'))).toBe(true);
+		child.kill('SIGINT');
+		expect(await code, stderr).toBe(1);
+		expect(stderr).toContain('journey record: stopping');
+		expect(stderr).toContain(join(dir, 'flows', 'fixtures'));
+		expect(existsSync(join(dir, '.journey', 'recording.har'))).toBe(false);
+		expect(existsSync(join(dir, 'flows', 'fixtures', 'recording.har'))).toBe(false);
+		expect(existsSync(join(root, 'journeys'))).toBe(false);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

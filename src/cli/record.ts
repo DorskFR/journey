@@ -1,11 +1,21 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
 import { type BrowserContext, chromium, type Frame, type Page } from '@playwright/test';
 import { compile } from '../core/compile.js';
 import { print } from '../core/print.js';
 import type { IR } from '../core/types.js';
 import { SENSITIVE_NAME } from '../core/validate.js';
+import type { Viewport } from '../playwright/driver.js';
 import { editorPath, runtimePath } from '../playwright/inject.js';
+import { ensureApp } from './app.js';
+import {
+	configPath,
+	journeysDir,
+	type LoadedConfig,
+	loadConfig,
+	variantNames,
+	viewports,
+} from './config.js';
 import { type Argv, flagString } from './main.js';
 
 export interface RecordOptions {
@@ -15,6 +25,8 @@ export interface RecordOptions {
 	har: boolean;
 	storageState: boolean;
 	headless: boolean;
+	viewport?: Viewport | null;
+	base?: string;
 }
 
 export interface Recorded {
@@ -23,16 +35,48 @@ export interface Recorded {
 	masked: string[];
 }
 
-export function recordOptions(argv: Argv): RecordOptions {
-	const url = argv.positional[0];
-	if (!url) throw new Error('journey record: a start url is required');
+export async function loadRecordConfig(argv: Argv): Promise<LoadedConfig | null> {
+	const path = flagString(argv, 'config');
+	if (path === undefined && !existsSync(configPath())) return null;
+	return loadConfig(path);
+}
+
+function startUrl(argv: Argv, loaded: LoadedConfig | null): string {
+	const given = argv.positional[0];
+	const app = loaded?.config.app?.url;
+	if (given && app && given.startsWith('/')) return new URL(given, app).href;
+	const url = given ?? app;
+	if (!url)
+		throw new Error('journey record: a start url is required, or set app.url in the config');
+	return url;
+}
+
+function recordViewport(argv: Argv, loaded: LoadedConfig | null): Viewport | null {
+	const asked = flagString(argv, 'viewport');
+	const sizes = loaded ? viewports(loaded.config) : {};
+	const name = asked ?? (loaded ? variantNames(loaded.config).viewport?.[0] : undefined);
+	if (name === undefined) return null;
+	const size = sizes[name];
+	if (!size) {
+		throw new Error(
+			`journey record: viewport "${name}" has no size, expected one of: ${Object.keys(sizes).join(', ') || 'none (no config)'}`,
+		);
+	}
+	return size;
+}
+
+export function recordOptions(argv: Argv, loaded: LoadedConfig | null = null): RecordOptions {
+	const out = flagString(argv, 'o');
+	const base = loaded?.dir ?? resolve('.');
 	return {
-		url,
-		dir: resolve(flagString(argv, 'o') ?? 'journeys'),
-		secrets: resolve('.journey'),
+		url: startUrl(argv, loaded),
+		dir: out !== undefined ? resolve(out) : loaded ? journeysDir(loaded) : resolve('journeys'),
+		secrets: join(base, '.journey'),
 		har: argv.flags['no-har'] !== true && argv.flags.har !== false,
 		storageState: argv.flags['storage-state'] === true,
 		headless: argv.flags.headless === true,
+		viewport: recordViewport(argv, loaded),
+		base,
 	};
 }
 
@@ -77,7 +121,8 @@ export function fromPayload(payload: unknown): Recorded {
 	return { ir: compiled, source: print(compiled), masked: maskedNames(compiled) };
 }
 
-export function acceptsFrom(page: Page, frame: Frame): boolean {
+export function acceptsFrom(page: Page | null | undefined, frame: Frame): boolean {
+	if (!page) return false;
 	return frame === page.mainFrame();
 }
 
@@ -149,6 +194,16 @@ export function secretFiles(id: string, opts: RecordOptions): { har: string; sto
 	};
 }
 
+export function rawHarPath(opts: RecordOptions): string {
+	return join(opts.secrets, 'recording.har');
+}
+
+export function ensureSecretsDir(opts: RecordOptions): void {
+	mkdirSync(opts.secrets, { recursive: true });
+	const ignore = join(opts.secrets, '.gitignore');
+	if (!existsSync(ignore)) writeFileSync(ignore, '*\n');
+}
+
 export async function saveExport(
 	context: BrowserContext,
 	recorded: Recorded,
@@ -159,23 +214,56 @@ export async function saveExport(
 	writeFileSync(source, recorded.source);
 	const written = [source];
 	if (opts.storageState) {
-		mkdirSync(opts.secrets, { recursive: true });
-		const ignore = join(opts.secrets, '.gitignore');
-		if (!existsSync(ignore)) writeFileSync(ignore, '*\n');
+		ensureSecretsDir(opts);
 		const storage = secretFiles(recorded.ir.id, opts).storage;
 		await context.storageState({ path: storage });
 		written.push(storage);
 	}
-	if (opts.har) written.push(secretFiles(recorded.ir.id, opts).har);
 	return written;
 }
 
-export function finishHar(harPath: string, recorded: Recorded, opts: RecordOptions): string {
-	const target = secretFiles(recorded.ir.id, opts).har;
-	const har = JSON.parse(readFileSync(harPath, 'utf8')) as Har;
-	writeFileSync(harPath, JSON.stringify(scrubHar(har, recorded.masked), null, 2));
-	renameSync(harPath, target);
-	return target;
+export function finishHar(harPath: string, recorded: Recorded[], opts: RecordOptions): string[] {
+	if (!recorded.length || !existsSync(harPath)) {
+		rmSync(harPath, { force: true });
+		return [];
+	}
+	const masked = [...new Set(recorded.flatMap((r) => r.masked))];
+	const scrubbed = JSON.stringify(
+		scrubHar(JSON.parse(readFileSync(harPath, 'utf8')) as Har, masked),
+		null,
+		2,
+	);
+	mkdirSync(join(opts.dir, 'fixtures'), { recursive: true });
+	const written = recorded.map((r) => {
+		const target = secretFiles(r.ir.id, opts).har;
+		writeFileSync(target, scrubbed);
+		return target;
+	});
+	rmSync(harPath, { force: true });
+	return written;
+}
+
+function fromBase(opts: RecordOptions, path: string): string {
+	const rel = relative(opts.base ?? resolve('.'), path);
+	return rel.split(sep).join('/');
+}
+
+export function replaySnippet(ids: string[], opts: RecordOptions): string[] {
+	if (!ids.length || (!opts.har && !opts.storageState)) return [];
+	const entry = (id: string): string => {
+		const files = secretFiles(id, opts);
+		const parts: string[] = [];
+		if (opts.har) parts.push(`har: '${fromBase(opts, files.har)}'`);
+		if (opts.storageState) parts.push(`storageState: '${fromBase(opts, files.storage)}'`);
+		return `\t\t'${id}': { ${parts.join(', ')} },`;
+	};
+	return [
+		'journey record: to replay offline, add to the config:',
+		'\tfixtures: {',
+		...ids.map(entry),
+		'\t},',
+		`and to each journey: ${ids.map((id) => `fixture: '${id}'`).join(', ')}`,
+	];
 }
 
 export function secretsNotice(opts: RecordOptions): string[] {
@@ -194,60 +282,87 @@ export function secretsNotice(opts: RecordOptions): string[] {
 }
 
 export async function runRecord(argv: Argv): Promise<number> {
-	const opts = recordOptions(argv);
-	mkdirSync(join(opts.dir, 'fixtures'), { recursive: true });
-	const harPath = join(opts.dir, 'fixtures', 'recording.har');
+	const loaded = await loadRecordConfig(argv);
+	const opts = recordOptions(argv, loaded);
+	const stopApp = loaded ? await ensureApp(loaded) : async () => {};
+	try {
+		return await record(opts);
+	} finally {
+		await stopApp();
+	}
+}
+
+async function record(opts: RecordOptions): Promise<number> {
+	const harPath = rawHarPath(opts);
+	if (opts.har) ensureSecretsDir(opts);
 	for (const line of secretsNotice(opts)) console.error(line);
-	const browser = await chromium.launch({ headless: opts.headless });
+	const browser = await chromium.launch({ headless: opts.headless, handleSIGINT: false });
 	const context = await browser.newContext({
-		viewport: null,
+		viewport: opts.viewport ?? null,
 		...(opts.har ? { recordHar: { path: harPath, mode: 'minimal' as const } } : {}),
 	});
 	await context.addInitScript({ path: runtimePath() });
 	await context.addInitScript({ path: editorPath() });
 	await context.addInitScript(forwardExportScript());
 
-	const page = await context.newPage();
-	const exported: { recorded: Recorded | null } = { recorded: null };
-	const closed = new Promise<void>((done) => {
-		context.on('close', () => done());
-		page.on('close', () => done());
+	const exported = new Map<string, Recorded>();
+	let stop: () => void = () => {};
+	const stopped = new Promise<void>((done) => {
+		stop = done;
 	});
-	const firstExport = new Promise<Recorded>((done) => {
-		void page.exposeBinding('__journeyExport', async ({ frame }, payload: unknown) => {
-			if (!acceptsFrom(page, frame)) {
-				console.error('journey record: ignored an export from a child frame');
-				return;
-			}
-			let recorded: Recorded;
-			try {
-				recorded = fromPayload(payload);
-			} catch (e) {
-				console.error((e as Error).message);
-				return;
-			}
-			exported.recorded = recorded;
-			const files = await saveExport(context, recorded, opts);
-			for (const file of files) console.log(file);
-			done(recorded);
+	const onSigint = (): void => {
+		console.error('journey record: stopping');
+		stop();
+	};
+	process.once('SIGINT', onSigint);
+	context.on('close', () => stop());
+	browser.on('disconnected', () => stop());
+
+	await context.exposeBinding('__journeyExport', async ({ frame, page }, payload: unknown) => {
+		if (!acceptsFrom(page, frame)) {
+			console.error('journey record: ignored an export from a child frame');
+			return;
+		}
+		let recorded: Recorded;
+		try {
+			recorded = fromPayload(payload);
+		} catch (e) {
+			console.error((e as Error).message);
+			return;
+		}
+		exported.set(recorded.ir.id, recorded);
+		const files = await saveExport(context, recorded, opts);
+		for (const file of files) console.log(file);
+		if (opts.headless) stop();
+	});
+
+	const watch = (page: Page): void => {
+		page.on('load', () => {
+			mountEditorIn(page).catch(() => {});
 		});
-	});
-
-	await page.goto(opts.url);
-	await mountEditorIn(page);
-	page.on('load', () => {
-		mountEditorIn(page).catch(() => {});
-	});
-	console.log('recording; export from the editor panel to write the journey');
-
-	if (opts.headless) await firstExport;
-	else await closed;
-
-	const recorded = exported.recorded;
+		page.on('close', () => {
+			if (!context.pages().length) stop();
+		});
+	};
+	const page = await context.newPage();
 	try {
-		await context.close();
-	} catch {}
-	await browser.close();
-	if (recorded && opts.har) finishHar(harPath, recorded, opts);
-	return recorded ? 0 : 1;
+		await page.goto(opts.url);
+		await mountEditorIn(page);
+		watch(page);
+		context.on('page', watch);
+		console.log('recording; export from the editor panel to write the journey');
+		await stopped;
+	} finally {
+		process.removeListener('SIGINT', onSigint);
+		try {
+			await context.close();
+		} catch {}
+		await browser.close();
+		if (opts.har) {
+			for (const file of finishHar(harPath, [...exported.values()], opts)) console.log(file);
+		}
+	}
+	const ids = [...exported.keys()];
+	for (const line of replaySnippet(ids, opts)) console.error(line);
+	return ids.length ? 0 : 1;
 }

@@ -783,10 +783,17 @@ or cross.
 - `compile [--public] [-o file]`: validates every journey, writes JSON array
   of IR to `-o` or prints; non-zero on validation errors listing
   `file: path: message`.
-- `check`: starts the app when `app.start` is set, runs every journey and
-  variant with presenter `none` at smoke level, prints a table with pass
-  or fail and the number of fallback and fragile targets, exit 1 on failure.
-  `--strict` also fails when any target is not `stable`. A failed action
+- `check [id...] [--strict] [--json] [--variant dim=value]`: starts the app
+  when `app.start` is set, runs the selected journeys and variants (default
+  all; ids and `--variant` as for `book`, an unknown one exits 1 naming the
+  valid ones) with presenter `none` at smoke level, prints a line per run
+  with pass or fail and the number of fallback and fragile targets, exit 1 on
+  failure. `--strict` also fails a journey when any target is not `stable`,
+  adds `strict: N unstable targets` to its lines and lists each one once under
+  them as `  step <id>: <fallback|fragile> <target>`. `--json` prints only
+  `{ ok, strict, errors, journeys: [{ id, file, ok, targets, unstable,
+  runs: [{ variant, ok, failures: [{ step?, error }] }] }] }` on stdout
+  (README "In CI"); load and argument errors go to `errors`. A failed action
   (click intercepted, element detached, action timeout) is that step's
   failure, `<kind> failed: <first line of the error>`, like an expectation.
 - `check`, `book` and `pages` stop the app and fixture commands they started
@@ -795,24 +802,37 @@ or cross.
   or never answers, the error ends with its exit code and last 40 lines.
 - Config `vars` are merged with the JSON object in the `JOURNEY_VARS`
   environment variable when set, so secrets never have to be written down.
+  Invalid JSON fails naming `JOURNEY_VARS`.
+- Every command rejects an option it does not take, and a value option
+  (`--config`, `-o`, `--variant`, ...) with no value, exit 1.
 - `test [playwright args...]`: spawns `npx playwright test -c <dist>/playwright/journeys.config.js`
   with `JOURNEY_CONFIG` set to the absolute config path and passes back the
   exit code. After `test`, journey consumes only `--config`, `--headed`,
   `--slow-mo` and `--help`; every other argument (`--grep`, `-g`, `--shard`,
   `--workers`, files...) is forwarded verbatim and in order, and everything
   after `--` is forwarded untouched.
-- `record <url> [-o dir] [--har] [--no-har] [--storage-state]`: launches
-  headed Chromium with the runtime and editor injected and `editor: true`.
-  The export binding takes only `{ ir }` from the page's main frame; the CLI
-  validates and compiles it and writes `<dir>/<id>.journey.ts` printed in
-  Node, ignoring any source or path the page sends. It records HAR to
-  `<dir>/fixtures/<id>.har` (default on), stripped of `authorization`,
-  `proxy-authorization`, `cookie` and `set-cookie` headers and of request
-  bodies holding a masked or secret-named field. `--storage-state` (off by
-  default) writes the storage state to `.journey/<id>.storage.json` under the
-  working directory, a directory that gitignores itself. Prints a warning
-  naming the secret-bearing files, prints the paths, keeps the browser open
-  until it is closed. Default dir: `journeys`.
+- `record [url] [-o dir] [--har] [--no-har] [--storage-state] [--viewport name]`:
+  loads the config when `--config` is given or the default one exists; the
+  url defaults to `app.url` and a leading-`/` url is resolved against it,
+  `app.start` is started when the app does not answer and stopped at the end,
+  the default dir is the fixed prefix of the first `journeys` pattern (else
+  `journeys`), and the window takes the first `variants.viewport` size or
+  `--viewport`'s. Launches headed Chromium with the runtime and editor
+  injected and `editor: true`, in every page of the context (tabs and
+  popups included). The export binding takes only `{ ir }` from a page's main
+  frame; the CLI validates and compiles it and writes `<dir>/<id>.journey.ts`
+  printed in Node, ignoring any source or path the page sends. It records the
+  session's HAR (default on) to `.journey/recording.har` and, when recording
+  stops (all pages closed, Ctrl-C, or the first export under `--headless`),
+  writes it to `<dir>/fixtures/<id>.har` for every exported id, stripped of
+  `authorization`, `proxy-authorization`, `cookie` and `set-cookie` headers
+  and of request bodies holding a masked or secret-named field, then removes
+  the raw file. `--storage-state` (off by default) writes the storage state to
+  `.journey/<id>.storage.json` next to the config (else the working
+  directory), a directory that gitignores itself. Prints a warning naming the
+  secret-bearing files, the paths it writes, and at the end the `fixtures`
+  config entry and `fixture` field that replay the journey from them; exits 1
+  when nothing was exported.
 - `book [id...] [--presenter doc|spot|guide|none] [--video] [--variant dim=value]`: journeys
   are compiled with `public: false`: a `qaOnly` step is hidden from the app
   guide but still runs and captures in the book, so the storyboard matches

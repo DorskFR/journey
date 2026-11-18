@@ -89,7 +89,8 @@ Closed shadow roots and cross-origin frames can't be targeted.
 
 Without attributes the recorder falls back to accessible role and name,
 labels, test ids and text, and `journey check --strict` tells you which
-targets still need one.
+targets still need one: it fails the journey and lists each of them under it,
+`  step save: fallback {"role":"button","name":"Save"}`.
 
 ## Config
 
@@ -119,13 +120,23 @@ falls back to Node type stripping: relative imports need their `.ts`
 extension, and enums, namespaces, parameter properties and `tsconfig` paths
 are not supported.
 
-`journey record` also saves a HAR to
-`journeys/fixtures/<id>.har` so the journey replays offline (`--no-har` to
-skip). Auth and cookie headers and request bodies with a secret field are
-removed, but response bodies stay: review the HAR before committing it.
+`journey record` reads the config when there is one: the url defaults to
+`app.url` (a bare path such as `/settings` is resolved against it), `app.start`
+is started when the app does not answer, the journey lands in the directory of
+the first `journeys` pattern, and the window takes the size of the first
+`variants.viewport` (`--viewport mobile` for another one). Without a config it
+needs a url and writes to `./journeys`.
+
+It also saves a HAR to `journeys/fixtures/<id>.har`, one per exported journey,
+holding the whole session, so the journey replays offline (`--no-har` to skip).
+Auth and cookie headers and request bodies with a secret field are removed, but
+response bodies stay: review the HAR before committing it. The raw HAR is kept
+in `.journey/` while recording and removed at the end, Ctrl-C included.
 `--storage-state` also saves cookies and local storage to
 `.journey/<id>.storage.json`, a self-gitignored directory outside the
-journeys; it holds live session tokens, so never commit it.
+journeys; it holds live session tokens, so never commit it. When it stops,
+`record` prints the `fixtures` entry to paste into the config and the
+`fixture: '<id>'` to add to the journey so it replays from those files.
 
 `check`, `book` and `pages` start `app.start` when `app.url` does not answer,
 and stop it on every exit, Ctrl-C included. When it never answers, the error
@@ -520,6 +531,37 @@ A failed test keeps its trace and screenshot in `<out>/.test-results/`, and
 an html report is written to `<out>/.test-report/`. Under `CI` a failure is
 retried once. Flags such as `--workers`, `--retries`, `--trace` and
 `--reporter` override these defaults.
+
+`journey check` takes journey ids and `--variant dim=value` like `book`, and
+`--json` prints one report on stdout instead of a line per run:
+
+```json
+{
+  "ok": false,
+  "strict": true,
+  "errors": [],
+  "journeys": [
+    {
+      "id": "create-note",
+      "file": "journeys/create-note.journey.ts",
+      "ok": false,
+      "targets": { "stable": 3, "fallback": 1, "fragile": 0 },
+      "unstable": [{ "step": "save", "health": "fallback", "target": "{\"role\":\"button\",\"name\":\"Save\"}" }],
+      "runs": [
+        { "variant": { "viewport": "desktop" }, "ok": true, "failures": [] },
+        { "variant": { "viewport": "mobile" }, "ok": false, "failures": [{ "step": "save", "error": "..." }] }
+      ]
+    }
+  ]
+}
+```
+
+A journey's `ok` is false when a run failed or, under `--strict`, when it has
+an unstable target. `errors` holds journeys that do not load and bad arguments
+(an unknown id or variant); `failures[].step` is missing when the run broke
+outside a step. `check` exits 0 when `ok` is true, 1 otherwise. Every command
+exits 1 on an option it does not take (`--strcit`) and on a value option with
+no value (`--config` alone).
 
 ## Existing Playwright suite
 
