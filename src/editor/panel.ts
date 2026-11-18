@@ -1,5 +1,5 @@
 import type { Interaction, Target } from '../core/types.js';
-import type { Dock, Draft, DraftStep, StepResult } from './draft.js';
+import type { Dock, Draft, DraftStep, RecordOptions, StepResult } from './draft.js';
 import { describeTarget } from './runtime.js';
 
 export type { StepResult };
@@ -37,6 +37,7 @@ export interface PanelView {
 	status: string | null;
 	collapsed: boolean;
 	dock: Dock;
+	options: RecordOptions;
 	varNames: string[];
 	vars: Record<string, string>;
 	expectForm: ExpectForm | null;
@@ -50,6 +51,7 @@ export interface PanelActions {
 	export(): void;
 	collapse(collapsed: boolean): void;
 	dock(side: Dock): void;
+	option(patch: Partial<RecordOptions>): void;
 	field(name: 'id' | 'title', value: string): void;
 	say(index: number, field: 'title' | 'body', value: string): void;
 	capture(index: number, on: boolean): void;
@@ -90,6 +92,8 @@ const CSS_TEXT = `
 .jp .fields{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
 .jp .fields label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:#555}
 .jp .toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.jp .options{display:flex;flex-wrap:wrap;gap:4px 12px;margin-bottom:8px;font-size:12px;color:#555}
+.jp .options label{display:flex;align-items:center;gap:4px}
 .jp .error{margin:0 0 8px;padding:6px 8px;border-radius:4px;background:#fde7e7;color:#8a1c1c;white-space:pre-wrap}
 .jp li.step .error{margin:4px 0 4px 24px;font-family:ui-monospace,monospace;font-size:12px}
 .jp .vars{margin-bottom:8px}
@@ -416,8 +420,20 @@ export function createPanel(container: HTMLElement, actions: PanelActions): Pane
 	const run = button('Run', 'run', '', actions.run);
 	const exportButton = button('Export', 'export', '', actions.export);
 	const toolbar = el('div', { class: 'toolbar' }, record, stop, preview, run, exportButton);
+	const hovers = el('input', { type: 'checkbox', 'data-editor': 'hovers' });
+	hovers.addEventListener('change', () => actions.option({ hovers: hovers.checked }));
+	const preferIndex = el('input', { type: 'checkbox', 'data-editor': 'prefer-index' });
+	preferIndex.addEventListener('change', () =>
+		actions.option({ prefer: preferIndex.checked ? 'index' : 'key' }),
+	);
+	const recordOptions = el(
+		'div',
+		{ class: 'options' },
+		el('label', {}, hovers, 'Record hovers'),
+		el('label', {}, preferIndex, 'Prefer index over key'),
+	);
 	const content = el('div', {});
-	body.append(fields, toolbar, content);
+	body.append(fields, toolbar, recordOptions, content);
 
 	return {
 		render(view) {
@@ -425,6 +441,8 @@ export function createPanel(container: HTMLElement, actions: PanelActions): Pane
 			const { draft } = view;
 			if (idInput.value !== draft.id) idInput.value = draft.id;
 			if (titleInput.value !== draft.title) titleInput.value = draft.title;
+			hovers.checked = view.options.hovers;
+			preferIndex.checked = view.options.prefer === 'index';
 			const busy = view.running;
 			const empty = draft.steps.length === 0;
 			record.hidden = view.recording;

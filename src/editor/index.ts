@@ -8,7 +8,9 @@ import {
 	type Dock,
 	type Draft,
 	type DraftStep,
+	defaultOptions,
 	emptyDraft,
+	type RecordOptions,
 	readState,
 	sameTarget,
 	stepId,
@@ -122,6 +124,7 @@ export function mountEditor(api: JourneyApi | undefined = globalThis.window?.__j
 	let expectForm: ExpectForm | null = null;
 	let collapsed = restored?.collapsed ?? false;
 	let dock: Dock = restored?.dock ?? 'right';
+	const options: RecordOptions = restored?.options ?? defaultOptions();
 
 	let pendingDigest: {
 		step: DraftStep;
@@ -144,14 +147,19 @@ export function mountEditor(api: JourneyApi | undefined = globalThis.window?.__j
 	};
 
 	const persist = (): void =>
-		writeState({ draft, recording, lastRoute: currentRoute(), results, collapsed, dock });
+		writeState({ draft, recording, lastRoute: currentRoute(), results, collapsed, dock, options });
 
 	const observer = createObserver<Prepared>({
 		ignore: (event) => event.composedPath().includes(api.overlay.host),
-		prepare: (el) => ({ located: locate(el), before: digest() }),
+		prepare: (el) => ({ located: locate(el, options), before: digest() }),
+		hovers: () => options.hovers,
 		emit(item) {
 			const action: Interaction = item.do;
 			const target = item.prepared?.located.target;
+			if (action.kind === 'click' || action.kind === 'dblclick') {
+				const last = draft.steps[draft.steps.length - 1];
+				if (last?.do?.kind === 'hover' && sameTarget(last.target, target)) draft.steps.pop();
+			}
 			if (action.kind === 'dblclick') {
 				let dropped = 0;
 				while (dropped < 2) {
@@ -297,7 +305,7 @@ export function mountEditor(api: JourneyApi | undefined = globalThis.window?.__j
 			render();
 			return null;
 		}
-		const located = locate(el);
+		const located = locate(el, options);
 		if (expectForm && needsTarget(expectForm.kind)) prefill(expectForm, located.el, located.target);
 		render();
 		return located.target;
@@ -333,6 +341,10 @@ export function mountEditor(api: JourneyApi | undefined = globalThis.window?.__j
 		},
 		dock(side) {
 			dock = side;
+			render();
+		},
+		option(patch) {
+			Object.assign(options, patch);
 			render();
 		},
 		field(name, value) {
@@ -422,6 +434,7 @@ export function mountEditor(api: JourneyApi | undefined = globalThis.window?.__j
 			status: status(),
 			collapsed,
 			dock,
+			options,
 			varNames: varNames(draft),
 			vars,
 			expectForm,

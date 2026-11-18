@@ -1,7 +1,14 @@
 import { expect, test } from '@playwright/test';
 import type { IR, IRStep } from '../../src/core/types.js';
 import { createDriver } from '../../src/runtime/driver.js';
-import { clearProgress, readProgress, storedParams } from '../../src/runtime/progress.js';
+import {
+	clearProgress,
+	type Progress,
+	progressStore,
+	readProgress,
+	storedParams,
+} from '../../src/runtime/progress.js';
+import type { JourneyStorage } from '../../src/runtime/storage.js';
 
 const AWAY: IRStep = {
 	id: 'away',
@@ -66,4 +73,26 @@ test('the driver writes progress without secret params or the IR', async () => {
 		delete g.window;
 		delete g.location;
 	}
+});
+
+test('progress calls reach an async adapter in the order they were made', async () => {
+	const cell = new Map<string, string>();
+	const delays = { set: 0, remove: 40 };
+	const later = (ms: number, work: () => void) =>
+		new Promise<void>((resolve) =>
+			setTimeout(() => {
+				work();
+				resolve();
+			}, ms),
+		);
+	const slowRemove: JourneyStorage = {
+		get: async (key) => cell.get(key) ?? null,
+		set: (key, value) => later(delays.set, () => cell.set(key, value)),
+		remove: (key) => later(delays.remove, () => cell.delete(key)),
+	};
+	const store = progressStore(() => slowRemove);
+	const saved: Progress = { id: 'b', version: 1, index: 0, mode: 'guide', params: {}, variant: {} };
+	void store.clear();
+	void store.write(saved);
+	expect(await store.read()).toEqual(saved);
 });

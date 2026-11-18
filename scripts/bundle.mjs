@@ -1,4 +1,5 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { build } from 'esbuild';
 
 const browser = {
@@ -80,3 +81,21 @@ try {
 export const { ${names.join(', ')} } = mod;
 `,
 );
+
+// CommonJS consumers resolve `require` types to .d.cts copies, so TypeScript
+// reads them as CommonJS instead of as ES modules in a "type": "module" package.
+const RELATIVE = /((?:from|import)\s*\(?\s*['"])(\.{1,2}\/[^'"]+)\.js(['"])/g;
+const pending = ['dist/index.d.ts', 'dist/playwright/index.d.ts'];
+const seen = new Set();
+while (pending.length) {
+	const file = pending.pop();
+	if (seen.has(file)) continue;
+	seen.add(file);
+	const source = readFileSync(file, 'utf8');
+	for (const [, , spec] of source.matchAll(RELATIVE)) {
+		const dep = join(dirname(file), `${spec}.d.ts`);
+		if (!existsSync(dep)) throw new Error(`bundle: ${file} imports ${spec}.js, no ${dep}`);
+		pending.push(dep);
+	}
+	writeFileSync(file.replace(/\.d\.ts$/, '.d.cts'), source.replace(RELATIVE, '$1$2.cjs$3'));
+}

@@ -38,6 +38,7 @@ export interface JourneyRunOptions {
 	placement?: RunOptions['placement'];
 	mask?: boolean;
 	onCapture?: RunOptions['onCapture'];
+	onStep?: RunOptions['onStep'];
 }
 
 export interface JourneyFixture {
@@ -80,6 +81,7 @@ export async function runConfigured(
 			masks: loaded.config.mask,
 			pace: opts.mask ? loaded.config.pace : undefined,
 			onCapture: opts.onCapture,
+			onStep: opts.onStep,
 		});
 	} finally {
 		await fixture.stop();

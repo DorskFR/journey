@@ -68,3 +68,24 @@ export async function clearProgress(storage: JourneyStorage = defaultStorage): P
 		await storage.remove(PROGRESS_KEY);
 	} catch {}
 }
+
+export interface ProgressStore {
+	read(): Promise<Progress | null>;
+	write(progress: Progress): Promise<void>;
+	clear(): Promise<void>;
+}
+
+// An async adapter may settle calls out of order, so a stale clear could land after a newer write.
+export function progressStore(storage: () => JourneyStorage): ProgressStore {
+	let tail: Promise<unknown> = Promise.resolve();
+	const queue = <T>(work: () => Promise<T>): Promise<T> => {
+		const next = tail.then(work);
+		tail = next.catch(() => {});
+		return next;
+	};
+	return {
+		read: () => queue(() => readProgress(storage())),
+		write: (progress) => queue(() => writeProgress(progress, storage())),
+		clear: () => queue(() => clearProgress(storage())),
+	};
+}

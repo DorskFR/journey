@@ -1,5 +1,5 @@
 import type { Expectation, Interaction, Step, Target } from '../core/types.js';
-import type { Health } from './locate.js';
+import type { Health, PathStyle } from './locate.js';
 
 export interface Suggestion {
 	label: string;
@@ -23,6 +23,11 @@ export type StepResult = 'pass' | 'fail' | 'skip';
 
 export type Dock = 'right' | 'left';
 
+export interface RecordOptions {
+	hovers: boolean;
+	prefer: PathStyle;
+}
+
 export interface DraftState {
 	draft: Draft;
 	recording: boolean;
@@ -30,9 +35,14 @@ export interface DraftState {
 	results: Record<number, StepResult>;
 	collapsed: boolean;
 	dock: Dock;
+	options: RecordOptions;
 }
 
 export const STORAGE_KEY = 'journey:draft';
+
+export function defaultOptions(): RecordOptions {
+	return { hovers: false, prefer: 'key' };
+}
 
 export function emptyDraft(): Draft {
 	return { id: 'my-journey', title: '', route: '/', steps: [] };
@@ -51,6 +61,10 @@ export function readState(): DraftState | null {
 			results: parsed.results ?? {},
 			collapsed: parsed.collapsed === true,
 			dock: parsed.dock === 'left' ? 'left' : 'right',
+			options: {
+				hovers: parsed.options?.hovers === true,
+				prefer: parsed.options?.prefer === 'index' ? 'index' : 'key',
+			},
 		};
 	} catch {
 		return null;

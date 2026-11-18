@@ -11,14 +11,23 @@ function keyCode(key: string): string {
 	return key;
 }
 
+type Realm = Window & typeof globalThis;
+
+// An element in a frame belongs to the frame's window: its events, prototypes
+// and focus live there, not in the window running the journey.
+function realm(el: Element): Realm {
+	return (el.ownerDocument.defaultView ?? window) as Realm;
+}
+
 function nativeSetter(el: Element, prop: 'value' | 'checked'): ((value: unknown) => void) | null {
+	const view = realm(el);
 	const proto =
-		el instanceof HTMLTextAreaElement
-			? HTMLTextAreaElement.prototype
-			: el instanceof HTMLInputElement
-				? HTMLInputElement.prototype
-				: el instanceof HTMLSelectElement
-					? HTMLSelectElement.prototype
+		el instanceof view.HTMLTextAreaElement
+			? view.HTMLTextAreaElement.prototype
+			: el instanceof view.HTMLInputElement
+				? view.HTMLInputElement.prototype
+				: el instanceof view.HTMLSelectElement
+					? view.HTMLSelectElement.prototype
 					: null;
 	if (!proto) return null;
 	const descriptor = Object.getOwnPropertyDescriptor(proto, prop);
@@ -26,24 +35,42 @@ function nativeSetter(el: Element, prop: 'value' | 'checked'): ((value: unknown)
 }
 
 function fire(el: Element, type: string, init: EventInit = {}): boolean {
-	return el.dispatchEvent(new Event(type, { bubbles: true, cancelable: true, ...init }));
+	return el.dispatchEvent(
+		new (realm(el).Event)(type, { bubbles: true, cancelable: true, ...init }),
+	);
 }
 
 const FOCUSABLE =
 	'a[href],area[href],button,input,select,textarea,summary,iframe,[tabindex],[contenteditable]:not([contenteditable="false"])';
 
+function frameDocument(el: Element): Document | null {
+	if (el.localName !== 'iframe' && el.localName !== 'frame') return null;
+	try {
+		return (el as HTMLIFrameElement).contentDocument;
+	} catch {
+		return null;
+	}
+}
+
 function deepActive(): Element | null {
 	let el = document.activeElement;
-	while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
-	return el;
+	for (;;) {
+		const inner = el?.shadowRoot?.activeElement ?? (el && frameDocument(el)?.activeElement);
+		if (!inner) return el;
+		el = inner;
+	}
+}
+
+function isHTML(el: Element | null): el is HTMLElement {
+	return el !== null && el instanceof realm(el).HTMLElement;
+}
+
+function isFocusTarget(el: Element | null): el is HTMLElement | SVGElement {
+	return el !== null && (isHTML(el) || el instanceof realm(el).SVGElement);
 }
 
 function focusable(el: Element): el is HTMLElement | SVGElement {
-	return (
-		(el instanceof HTMLElement || el instanceof SVGElement) &&
-		el.matches(FOCUSABLE) &&
-		!el.matches(':disabled')
-	);
+	return isFocusTarget(el) && el.matches(FOCUSABLE) && !el.matches(':disabled');
 }
 
 // A real press focuses the nearest focusable ancestor, or blurs when there is none.
@@ -55,7 +82,7 @@ function focusFrom(el: Element): void {
 		}
 	}
 	const active = deepActive();
-	if (active instanceof HTMLElement || active instanceof SVGElement) active.blur();
+	if (isFocusTarget(active)) active.blur();
 }
 
 function pointAt(el: Element): MouseEventInit {
@@ -64,7 +91,7 @@ function pointAt(el: Element): MouseEventInit {
 		bubbles: true,
 		cancelable: true,
 		composed: true,
-		view: window,
+		view: realm(el),
 		clientX: rect.left + rect.width / 2,
 		clientY: rect.top + rect.height / 2,
 		button: 0,
@@ -72,7 +99,8 @@ function pointAt(el: Element): MouseEventInit {
 }
 
 function pointer(el: Element, type: string, init: MouseEventInit): boolean {
-	const Ctor = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+	const view = realm(el);
+	const Ctor = typeof view.PointerEvent === 'function' ? view.PointerEvent : view.MouseEvent;
 	return el.dispatchEvent(
 		new Ctor(type, {
 			...init,
@@ -87,29 +115,30 @@ function hover(el: Element): void {
 	const at = pointAt(el);
 	pointer(el, 'pointerover', at);
 	pointer(el, 'pointerenter', { ...at, bubbles: false });
-	el.dispatchEvent(new MouseEvent('mouseover', at));
-	el.dispatchEvent(new MouseEvent('mouseenter', { ...at, bubbles: false }));
+	el.dispatchEvent(new (realm(el).MouseEvent)('mouseover', at));
+	el.dispatchEvent(new (realm(el).MouseEvent)('mouseenter', { ...at, bubbles: false }));
 	pointer(el, 'pointermove', at);
-	el.dispatchEvent(new MouseEvent('mousemove', at));
+	el.dispatchEvent(new (realm(el).MouseEvent)('mousemove', at));
 }
 
 function clickOnce(el: Element, detail: number): void {
 	const at = { ...pointAt(el), detail };
 	const down = pointer(el, 'pointerdown', { ...at, buttons: 1 });
 	const mouseDown = down
-		? el.dispatchEvent(new MouseEvent('mousedown', { ...at, buttons: 1 }))
+		? el.dispatchEvent(new (realm(el).MouseEvent)('mousedown', { ...at, buttons: 1 }))
 		: true;
 	if (mouseDown) focusFrom(el);
 	pointer(el, 'pointerup', at);
-	if (down) el.dispatchEvent(new MouseEvent('mouseup', at));
-	el.dispatchEvent(new MouseEvent('click', at));
+	if (down) el.dispatchEvent(new (realm(el).MouseEvent)('mouseup', at));
+	el.dispatchEvent(new (realm(el).MouseEvent)('click', at));
 }
 
 function click(el: Element, count = 1): void {
 	if (el.matches(':disabled')) return;
 	hover(el);
 	for (let i = 1; i <= count; i++) clickOnce(el, i);
-	if (count === 2) el.dispatchEvent(new MouseEvent('dblclick', { ...pointAt(el), detail: 2 }));
+	if (count === 2)
+		el.dispatchEvent(new (realm(el).MouseEvent)('dblclick', { ...pointAt(el), detail: 2 }));
 }
 
 const TEXT_INPUT =
@@ -123,22 +152,30 @@ function insertFallback(el: HTMLElement, value: string): void {
 		inputType: 'insertText',
 		data: value,
 	};
-	if (!el.dispatchEvent(new InputEvent('beforeinput', init))) return;
+	const view = realm(el);
+	if (!el.dispatchEvent(new view.InputEvent('beforeinput', init))) return;
 	const setter = nativeSetter(el, 'value');
 	if (setter) setter(value);
 	else if (el.isContentEditable) el.textContent = value;
 	else (el as HTMLInputElement).value = value;
-	el.dispatchEvent(new InputEvent('input', { ...init, cancelable: false }));
+	el.dispatchEvent(new view.InputEvent('input', { ...init, cancelable: false }));
+}
+
+function fieldOf(el: Element): HTMLInputElement | HTMLTextAreaElement | null {
+	const view = realm(el);
+	return el instanceof view.HTMLInputElement || el instanceof view.HTMLTextAreaElement ? el : null;
+}
+
+function typeable(el: HTMLElement, field: HTMLInputElement | HTMLTextAreaElement | null): boolean {
+	return field ? field.localName === 'textarea' || field.matches(TEXT_INPUT) : el.isContentEditable;
 }
 
 // The editing command makes the browser edit the field itself, as typing does,
 // so value trackers and editors that handle beforeinput see a native edit.
 function typeInto(el: HTMLElement, value: string): void {
 	el.focus({ preventScroll: true });
-	const field = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el : null;
-	const editable = field
-		? field instanceof HTMLTextAreaElement || field.matches(TEXT_INPUT)
-		: el.isContentEditable;
+	const field = fieldOf(el);
+	const editable = typeable(el, field);
 	if (!editable || deepActive() !== el) {
 		insertFallback(el, value);
 		return;
@@ -146,9 +183,9 @@ function typeInto(el: HTMLElement, value: string): void {
 	const before = field?.value;
 	if (field) field.select();
 	else {
-		const range = document.createRange();
+		const range = el.ownerDocument.createRange();
 		range.selectNodeContents(el);
-		const selection = getSelection();
+		const selection = el.ownerDocument.getSelection();
 		selection?.removeAllRanges();
 		selection?.addRange(range);
 	}
@@ -156,14 +193,14 @@ function typeInto(el: HTMLElement, value: string): void {
 	try {
 		done =
 			value === ''
-				? document.execCommand('delete', false)
-				: document.execCommand('insertText', false, value);
+				? el.ownerDocument.execCommand('delete', false)
+				: el.ownerDocument.execCommand('insertText', false, value);
 	} catch {}
 	if (!done || (field && field.value === before && before !== value)) insertFallback(el, value);
 }
 
-function tabbables(): HTMLElement[] {
-	return [...document.querySelectorAll<HTMLElement>(FOCUSABLE)]
+function tabbables(doc: Document): HTMLElement[] {
+	return [...doc.querySelectorAll<HTMLElement>(FOCUSABLE)]
 		.filter((el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length > 0)
 		.map((el, i) => ({ el, i }))
 		.sort((a, b) => (a.el.tabIndex || 1e9) - (b.el.tabIndex || 1e9) || a.i - b.i)
@@ -171,7 +208,7 @@ function tabbables(): HTMLElement[] {
 }
 
 function moveFocus(from: Element, back: boolean): void {
-	const list = tabbables();
+	const list = tabbables(from.ownerDocument);
 	if (list.length === 0) return;
 	const at = list.indexOf(from as HTMLElement);
 	const next =
@@ -193,15 +230,12 @@ function implicitSubmit(el: Element): void {
 const ACTIVATES = 'button,a[href],summary,input[type=submit],input[type=button],input[type=reset]';
 
 function typeChar(el: Element, key: string): void {
-	if (!(el instanceof HTMLElement) || deepActive() !== el) return;
-	const field = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el : null;
-	const editable = field
-		? field instanceof HTMLTextAreaElement || field.matches(TEXT_INPUT)
-		: el.isContentEditable;
-	if (!editable) return;
+	if (!isHTML(el) || deepActive() !== el) return;
+	const field = fieldOf(el);
+	if (!typeable(el, field)) return;
 	let done = false;
 	try {
-		done = document.execCommand('insertText', false, key);
+		done = el.ownerDocument.execCommand('insertText', false, key);
 	} catch {}
 	if (!done) insertFallback(el, `${field ? field.value : (el.textContent ?? '')}${key}`);
 }
@@ -230,6 +264,7 @@ function press(target: Element, spec: string): void {
 	};
 	const chord = init.ctrlKey || init.altKey || init.metaKey;
 	const printable = key.length === 1 && !chord;
+	const { KeyboardEvent } = realm(el);
 	let proceed = el.dispatchEvent(new KeyboardEvent('keydown', init));
 	if (proceed && (printable || key === 'Enter')) {
 		proceed = el.dispatchEvent(new KeyboardEvent('keypress', init));

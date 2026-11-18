@@ -40,6 +40,7 @@ seats change what a run means:
 ```
 src/
   index.ts                 public API of the "." export
+  version.ts               VERSION, generated from package.json
   core/
     types.ts               Journey, Step, Target, Expectation, Config, IR
     define.ts              defineJourney, defineConfig, msg, param
@@ -52,15 +53,23 @@ src/
     overlay.ts             <journey-overlay> host, shadow root, raise()
     resolve.ts             resolveOne, resolveAll, accessible name/role
     engine.ts              Engine class, step loop, events
-    actors.ts              humanActor, domActor, driverActor
+    actors.ts              humanActor, steppedActor, domActor, DriverActor
     presenters.ts          nonePresenter, guidePresenter, docPresenter, spotPresenter, cursor
-    progress.ts            sessionStorage persistence
+    progress.ts            run progress persistence
+    storage.ts             JourneyStorage adapter and its default
+    route.ts               route and url matching, history watch, variant detection
+    strings.ts             runtime Strings, defaults, interpolation
+    text.ts                text, locale and param resolution
     mask.ts                masking for capture
     driver.ts              window.__journey.driver protocol
   editor/
     index.ts               mountEditor(), exports
     observe.ts             event observation -> draft steps
     locate.ts              best target for an element, health
+    draft.ts               draft state, step ids, sessionStorage
+    pick.ts                element picker for expectations
+    vars.ts                Values (var.* params) in sessionStorage
+    runtime.ts             access to the mounted runtime's resolvers
     digest.ts              UI digest and expectation suggestions
     panel.ts               editor panel UI in the overlay shadow root
     export.ts              draft -> IR -> print(); download, clipboard, POST
@@ -99,7 +108,9 @@ Build: `scripts/version.mjs` writes `src/version.ts` from package.json;
 `scripts/bundle.mjs` produces `dist/runtime.iife.js` (global `journeyRuntime`)
 and `dist/editor.iife.js` (global `journeyEditor`) with esbuild, plus
 CommonJS copies `dist/index.cjs` and `dist/playwright/index.cjs` served by
-the `require` export conditions. Playwright transpiles a user's `.ts` config,
+the `require` export conditions, typed by `.d.cts` copies of the declarations
+they reach. `./runtime` and `./editor` are ESM only; `require()` reaches them
+through Node's require(esm). No source maps ship. Playwright transpiles a user's `.ts` config,
 journeys and specs to CommonJS when their package has no `"type": "module"`,
 and a `require` of an ES module that is still being linked by the runner
 fails, so those two entry points must exist in both formats. Dynamic imports
@@ -208,10 +219,10 @@ that directory as their working directory unless `cwd` is set:
 
 ```ts
 export interface Fixture {
-	command?: string; cwd?: string; ready?: string;   // start a process, poll ready URL (200)
+	command?: string; cwd?: string; ready?: string;   // with ready: a server polled until it answers < 500; without: run to exit 0
 	har?: string; harUrl?: string; notFound?: 'abort' | 'fallback';
 	storageState?: string;
-	setup?: (ctx: { baseUrl: string; request: import('@playwright/test').APIRequestContext }) => Promise<Record<string, string> | void>;
+	setup?: (ctx: { baseUrl: string; request: FixtureRequest }) => Promise<Record<string, string> | undefined>;  // FixtureRequest: the get/post/put/patch/delete/head/fetch subset of Playwright's APIRequestContext, typed without importing @playwright/test
 	params?: Record<string, string>;
 }
 export interface Config {
@@ -221,12 +232,14 @@ export interface Config {
 	variants?: Record<string, Record<string, unknown> | string[]>;
 	fixtures?: Record<string, Fixture>;
 	vars?: Record<string, string>;
-	pages?: Array<string | { route: string; name?: string; variants?: Record<string, string[]> }>;
+	pages?: Array<string | { route: string; name?: string; fixture?: string; variants?: Record<string, string[]> }>;
 	mask?: TargetPath[];
 	storageState?: string;
 	presenter?: 'doc' | 'spot' | 'guide' | 'none';  // book default 'doc'
+	placement?: 'anchored' | 'banner';              // book and journey.run caption position, default 'anchored'
 	video?: { size?: { width: number; height: number }; formats?: Array<'webm' | 'mp4' | 'gif'> };
-	pace?: { beforeAction?: number; afterSettle?: number };  // book only, ms, default 600 / 800
+	pace?: { beforeAction?: number; afterSettle?: number };  // book only, ms, default 0 / 0
+	test?: { retries?; workers?; fullyParallel?; timeout?; maxFailures?; forbidOnly?; expect?: { timeout? }; use?: { trace?; screenshot?; video?; [option]: unknown } };  // journey test defaults, CLI flags win
 }
 ```
 
@@ -250,7 +263,9 @@ increasing precedence: `{ viewport: 'desktop' }`, the detected
 Grammar: `segment ( ( '/' | '>>' ) segment )* '>>'?`,
 `segment = name ( '[' key ']' )? ( '[' '#' index ']' )?`,
 `name = [A-Za-z0-9_.:-]+`, `key = [^\]]+` where a key of the form `{p}` is a
-param reference resolved from `step.params[p]`, and `index` is an integer.
+param reference resolved from `step.params[p]`, else the run param `p`
+(a param missing from both fails the run before it starts, §5), and `index`
+is an integer.
 A key may not begin with `#`; that spelling is reserved for the index, so a
 malformed one such as `card[#a]` is an error rather than a literal key.
 Whitespace around `/` and `>>` is ignored; `>>` inside a key is part of the
@@ -272,6 +287,11 @@ Resolution (`resolveAll(target, params, root = document)`):
   crosses into a shadow root or a frame, so paths without `>>` resolve as if
   neither existed. Closed shadow roots and cross-origin frames yield no match.
   `within: 'a>>'` scopes a locator to that shadow root or frame document.
+  A target inside frames is drawn, captured and cropped at its position in
+  the top page (each frame's content-box offset added; CSS transforms and
+  zoom on the frame element are not accounted for), and the DOM actor
+  dispatches events built in the target's own window, with coordinates in
+  that frame's viewport.
 - Index segment: after the name and any key narrow the matches, `[#i]` keeps
   the single element at position `i` among the **visible** ones, in document
   order and 0-based, counting from the end when `i` is negative. Out of range
@@ -288,8 +308,13 @@ Resolution (`resolveAll(target, params, root = document)`):
   `querySelectorAll`; `within` scopes the search to a resolved path; `nth`
   picks an index after all other filters.
 - Only visible elements count for targets and for `visible`, `text`, `value`,
-  `checked`, `enabled`, `disabled` expectations. Visible means a non-empty
-  bounding box and no ancestor with `display:none` or `visibility:hidden`.
+  `checked`, `enabled`, `disabled` expectations. Visible means a bounding box
+  with non-zero width and height, and `checkVisibility({ visibilityProperty:
+  true })` (no ancestor with `display:none`, `content-visibility:hidden` or
+  `visibility:hidden`); opacity and position off-screen do not matter. A
+  `checked` or `value` expectation also accepts a hidden form control when one
+  of its `<label>`s is visible, so a native checkbox a design system hides
+  behind its label can be asserted.
   `hidden` passes when zero visible matches. `count` counts visible matches.
 
 `resolveOne` returns `{ el }` for exactly one match, `{ error: 'notfound' }`
@@ -299,15 +324,18 @@ path whose last segment carries no key, param or index is the one shape
 is ambiguous the engine's message appends the indexed spelling that resolves
 it.
 
-Computed role: explicit `role` attribute, else implicit for `button`, `a[href]`
-(link), `input` by type (`checkbox`, `radio`, `textbox`, `button` for
-submit/button/reset, `searchbox`, `slider`, `spinbutton`), `select`
-(combobox), `textarea` (textbox), `h1..h6` (heading), `nav`, `main`, `dialog`,
-`option`, `li` (listitem), `ul`/`ol` (list), `table`, `img`, `summary`
-(button), `details` (group). Accessible name: `aria-labelledby` (joined text
-of referenced ids), else `aria-label`, else for form controls the associated
-label's text (via `for` or wrapping), else `alt` for images, else `title`,
-else trimmed textContent with whitespace collapsed. This is a pragmatic
+Computed role: explicit `role` attribute, else implicit for `button`,
+`a[href]`/`area[href]` (link), `input` by type (`checkbox`, `radio`, `button`
+for submit/button/reset/image, `searchbox` for search, `slider` for range,
+`spinbutton` for number, `textbox` for any other type but `hidden`, which has
+none), `select` (combobox), `textarea` (textbox), `h1..h6` (heading), `nav`
+(navigation), `main`, `dialog`, `option`, `li` (listitem), `ul`/`ol` (list),
+`table`, `img`, `summary` (button), `details` (group). Accessible name:
+`aria-labelledby` (joined text of referenced ids), else `aria-label`, else for
+form controls the associated label's text (via `for` or wrapping), else `alt`
+for images, else the collapsed textContent for roles named from content
+(button, link, heading, option, checkbox, radio, menuitem, cell, ...), else
+`title`, else the collapsed textContent. This is a pragmatic
 subset, not full accname; document that in a type comment on the function.
 
 ## 5. Runtime
@@ -324,6 +352,13 @@ interface MountOptions {
 	track?: (event: string, data: Record<string, unknown>) => void;
 	exportUrl?: string;                        // editor POST target
 	launcher?: boolean;                        // default false; small floating button listing journeys
+	navigate?: (route: string) => void | Promise<void>;
+	                                           // the go-to-page card's button calls it instead of assigning location.href
+	storage?: JourneyStorage;                  // { get, set, remove }, sync or async; default sessionStorage for progress,
+	                                           // localStorage for done markers, memory when storage throws
+	presenter?: Presenter | ((name: PresenterName) => Presenter);
+	                                           // an object replaces every built-in presenter but none; a function gets the name
+	placement?: 'anchored' | 'banner';         // card and caption position, default 'anchored'; wins over a driven run's
 	strings?: Partial<Strings> | ((locale: string | undefined) => Partial<Strings>);
 	                                           // overrides for the runtime's own text; a function is called with the current locale at show time
 	params?: Record<string, string> | ((id: string) => Record<string, string> | undefined);
@@ -338,6 +373,7 @@ interface Strings {
 	step: string;                              // 'Step {i} of {n}'
 	goToPage: string;                          // 'Go to another page'
 	goToPageBody: string;                      // 'Open {route} to continue.'
+	goToPageAction: string;                    // 'Take me there'
 	press: string;                             // 'Press' (keystroke toast prefix)
 }
 ```
@@ -345,7 +381,8 @@ interface Strings {
 If `window.__journey` exists, `mount(options)` assigns `options` over the
 mounted runtime's options (re-rendering the launcher, applying `placement`,
 mounting the editor and registering `journeys` when given) and returns the
-same api; `mount()` returns it unchanged. Otherwise it returns and installs
+same api; `mount()` returns it unchanged. When that api belongs to another
+copy of the runtime, options are ignored with a console warning. Otherwise it returns and installs
 `window.__journey`:
 
 ```ts
@@ -354,7 +391,7 @@ interface JourneyApi {
 	                                           // validate and compile each journey on its own, add the valid ones (replaces same id);
 	                                           // an invalid one is skipped with console.error and drops the journey of its id; params feed a resumed run
 	list(): Array<{ id: string; title?: string; version: number }>;
-	start(id: string, opts?: { mode?: 'guide' | 'preview' | 'run'; from?: number; params?: Record<string, string> }): Promise<RunResult>;
+	start(id: string, opts?: { mode?: 'guide' | 'preview' | 'run'; from?: number; params?: Record<string, string>; variant?: Record<string, string> }): Promise<RunResult>;
 	                                           // guide: human actor + guide presenter; preview: stepped actor (dom actions gated on Next, Enter, Space or ArrowRight) + guide presenter; run: dom actor + no presenter
 	stop(): void;
 	current(): { id: string; index: number } | null;
@@ -365,16 +402,21 @@ interface JourneyApi {
 	overlay: Overlay;
 	resolve: { resolveOne, resolveAll, resolvePath, accessibleName, computedRole, isVisible, resolveStepParams };
 	version: string;
+	options: MountOptions;                     // the live mount options
+	engine(): Engine | null;                   // the current run's engine
 	unmount(): void;                           // stop the run, remove the click listener, overlay, launcher and window.__journey
 }
 
 interface Overlay {
 	host: HTMLElement;                         // the <journey-overlay> element
 	root: ShadowRoot;
-	parts: Record<'spot' | 'card' | 'cursor' | 'toast' | 'caption' | 'badge' | 'panel', HTMLElement>;
+	parts: Record<'spot' | 'badge' | 'card' | 'cursor' | 'ripple' | 'toast' | 'caption' | 'panel' | 'launcher', HTMLElement>;
+	placement: 'anchored' | 'banner';
 	raise(): void;
 	remove(): void;
 	target(): DOMRect | null;                  // rect of the element currently shown
+	track(el: Element | null, opts?: { scroll?: boolean }): void;
+	layout(): void;
 }
 ```
 
@@ -407,7 +449,7 @@ any mode, fails the run before it starts:
 logged with `console.error`.
 
 Engine (`engine.ts`): `new Engine(ir, deps)` where deps are
-`{ actor, presenter, params, variant, translate, probes, pace, mask, track }`.
+`{ actor, presenter, presenterFor?, params, variant, translate?, probes?, pace?, mask?, masks?, track?, progress?, navigate? }`.
 `run(from = 0): Promise<RunResult>` where
 `RunResult = { ok: boolean; completed: number; failures: Array<{ stepId: string; error: string }> ; aborted?: boolean }`.
 Per step:
@@ -420,13 +462,15 @@ Per step:
    the actor to navigate if it never arrives. When nothing preceded the step
    (first step, a resumed run, or an informational step before it), ask the
    actor to navigate at once. `actor.navigate(route)`: for the human actor
-   this shows a card asking the user to go there; for dom it assigns
+   this shows a card asking the user to go there, whose button calls the
+   mount `navigate` hook or assigns `location.href`; the stepped actor shows
+   a card and navigates like dom on Next; for dom it assigns
    `location`, keeping the `journey` query flag; for the driver it yields
    `{ route }` to the host. Progress records that the step forced a
    navigation, and a resumed step that forced one already fails on the next
    miss instead of navigating again. After navigation the engine continues
    from the same step (progress is persisted before navigating).
-4. Resolve the target with polling every 100 ms up to `timeout`, for every
+4. Resolve the target by polling (below) up to `timeout`, for every
    actor. The human and stepped actors first draw the step with no target
    and no Next, so Exit and Escape work while it is pending. `optional` steps
    skip on timeout; any other step fails the run, which clears progress so a
@@ -448,7 +492,7 @@ Per step:
    timeout fails the step.
 7. `actor.perform(step, el)`; the engine draws the click ripple when the actor
    reports completion.
-8. Wait for all expectations, polling every 100 ms up to `timeout`. A failing
+8. Wait for all expectations, polling up to `timeout`. A failing
    expectation produces an error string naming the expectation and the
    observed state, for example `visible notes/dialog: 0 matches`. Each probe
    call is raced against the time left: a probe that throws or has not
@@ -463,11 +507,23 @@ Events emitted via a small emitter and forwarded to `track`:
 `journey:start`, `step:start`, `step:resolved`, `step:acted`, `step:pass`,
 `step:fail`, `step:skip`, `journey:done`, `journey:abort`.
 
-Route matching: compare `location.pathname` to `route`; if `route` contains
-`#`, compare `pathname + hash`. Exact match only.
+Polling: every 100 ms for the first second, then the gap doubles up to 1 s.
+While it waits past the first second, a DOM mutation (`MutationObserver` on
+the document) or a route change ends the gap early, so a change is still seen
+within about 100 ms while a static page is scanned at most once a second.
 
-Expectation `url`: same comparison as route; when the string contains `*`
-convert to a regex where `*` is `[^/]*` and `**` is `.*`.
+Route matching: compare `location.pathname` to `route`; if `route` contains
+`#`, compare `pathname + hash`. A trailing `/` on the path is ignored on both
+sides; otherwise the match is exact. Validation requires a step `route` to
+start with `/` and to carry no query string (a `?` before any `#`); assert
+the query with a `url` expectation.
+
+Expectation `url` (and `autostart.route`): same comparison as route, and the
+string must start with `/` or `*`. When it contains `*` convert to a regex
+where `*` is `[^/]*` and `**` is `.*`. A query string before any `#`
+(`/settings?tab=api`) is not part of the path comparison: each listed
+parameter must be present in `location.search` with that value, and other
+parameters are allowed.
 
 `text` with `MsgRef` resolves through `translate(id, locale)`; if the hook
 is absent or returns undefined the id itself is used. `Record<Locale,string>`
@@ -485,7 +541,10 @@ Unresolved refs fail the step with a clear error.
   resolve when an `input` or `change` event fires and, if the value is a
   literal, the element value equals it. For `select` and `check` resolve on
   `change`. For `press` resolve on a matching `keydown`. For `hover` resolve
-  on `pointerenter`. For `none` resolve when the presenter's Next is pressed.
+  on `pointerenter`. For `none` resolve when the presenter's Next is pressed;
+  `navigate` waits for Next, then assigns `location.href`. When an action
+  step's card shows Next and the user presses it instead, the DOM actor
+  performs the action.
 - `domActor` dispatches the sequence a real user produces, so component
   libraries that listen past `click` (menus opening on `pointerdown`,
   controlled inputs with value trackers) behave as in a guide. `hover`
@@ -506,15 +565,17 @@ Unresolved refs fail the step with a clear error.
   through the native setter and dispatches `input` and `change`, and fails
   the step when no option matches. `check` clicks the box when its state
   differs, and fails the step when the click did not change it (unchecking a
-  radio sets it directly). `press` takes `Key` or `Mod+Key` (`Shift`,
+  radio sets it directly); like every action it needs a visible target, so a
+  native checkbox hidden behind its label is checked with a `click` on the
+  label and asserted with `checked`. `press` takes `Key` or `Mod+Key` (`Shift`,
   `Control`, `Alt`, `Meta`), focuses the target unless focus is already in
   it, and dispatches `keydown`, `keypress` (printable keys and Enter only)
   and `keyup` on the focused element; when not cancelled, Tab and Shift+Tab
-  move focus, Enter activates a button or link or implicitly submits the
+  move focus among the focusables of the target's own document, Enter activates a button or link or implicitly submits the
   field's form (`requestSubmit`, not when its submit button is disabled),
   Space activates buttons and checkboxes, and a printable key is typed into
   a focused text field. `navigate` assigns `location.href`.
-- `driverActor`: sets `data-journey-focus="<stepId>"` on the element, yields
+- `DriverActor`: sets `data-journey-focus="<stepId>"` on the element, yields
   `{ action }` to the host through the driver protocol, resolves when the
   host calls `driver.acted()`, then removes the attribute.
 
@@ -558,7 +619,9 @@ bubble phase, after the page, and is ignored when the page called
 `preventDefault()`, when focus is inside an open `dialog`, a `[popover]`, a
 `[role=menu]` or `[role=listbox]` or on an `aria-expanded="true"` control
 outside the overlay, and on a step whose action is pressing Escape (its Exit
-button then shows no `Esc` hint). The spotlight scrolls
+button then shows no `Esc` hint). Enter, Space and ArrowRight press Next
+only when focus is in the overlay or on the page body; on a page control the
+key is left to that control. The spotlight scrolls
 the target into view (`scrollIntoView({ block: 'center' })`) before measuring.
 
 Presenter factories take the `t(key, vars)` helper built from `strings`
@@ -578,8 +641,10 @@ its `aria-label` is the step title (removed when the step has none) and
 `aria-describedby` points at the body. Keys typed into an
 editable element outside the overlay are ignored.
 
-Colors: accent `#ffd166`, text `#111`, card background `#fff`, dim
-`rgba(0,0,0,.55)`. Font `system-ui`. Keep the CSS in one template string.
+Colors and font are CSS custom properties read from the page, defaulting to
+`--journey-accent: #ffd166`, `--journey-text: #111`, `--journey-surface: #fff`,
+`--journey-scrim: rgba(0,0,0,.55)` and `--journey-font: 14px/1.4 system-ui,
+sans-serif` (README "Theming" lists them all). Keep the CSS in one template string.
 
 ### 5.3 Masking
 
@@ -599,6 +664,9 @@ in book mode it stays, because the video records until the page closes.
 
 `sessionStorage['journey:progress'] = JSON.stringify({ id, version, index, mode, params, variant, acted, navigated })`.
 Written before navigation and after each step; removed on done or abort.
+Reads, writes and removes go to the storage adapter one at a time, in the
+order the runtime made them, so a slow async `remove` from a stopped run
+cannot land after the next run's first write.
 `params` never holds a secret: keys under `var.`, keys matching the
 sensitive-name rule (`pass`, `token`, `secret`, `otp`, `card`, `cvc`, `ssn`)
 and the params of `mask: true` fills are left out. A resumed run gets them
@@ -616,24 +684,32 @@ when the editor module is present (`window.journeyEditor` or import).
 Importing the module has no effect outside a browser; `mountEditor` there
 throws `journey: mountEditor needs a browser; call it client-side`.
 
-Observation (`observe.ts`): capturing listeners on `document` for `click`,
-`dblclick`, `input`, `change`, `keydown`, and navigation (`popstate`,
+Observation (`observe.ts`): capturing listeners on `document` (and every
+same-origin frame's document) for `click`, `dblclick`, `input`, `change`,
+`focusout`, `keydown`, `mouseover`/`mouseout`, and navigation (`popstate`,
 `hashchange`, patched `history.pushState`/`replaceState`). Events whose
 target is inside `<journey-overlay>` are ignored. For `input` on text
-controls, buffer until `change`, `blur`, or Enter and emit one `fill` step
-with the final value. A `change` on `select` emits `select`; on checkbox or
-radio emits `check`. `keydown` of Enter, Escape, Tab, or arrows emits `press`
-(printable keys are part of fill). Navigation emits a step with
-`do: { kind: 'none' }` and `route` set, unless it happened within 500 ms after
-a click, in which case `route` is attached to the following step instead.
+controls, buffer until `change`, focus leaving the control, or Enter and emit
+one `fill` step with the final value. A `change` on `select` emits `select`;
+on checkbox or radio emits `check`. `keydown` of Enter, Escape or an arrow
+emits `press` (printable keys are part of fill); Tab is never recorded, nor
+Enter inside a `textarea` or `contenteditable`, where it is part of the text.
+With the panel's "Record hovers" option on, the pointer resting 500 ms on an
+interactive element emits `hover`; a click or double click on the same target
+right after replaces it. Navigation emits a step with `do: { kind: 'none' }`
+and `route` set, unless it happened within 500 ms after a click, in which
+case `route` is attached to the following step instead.
 
 Target choice (`locate.ts`): walk from the event target up to the nearest
 element that is a button, link, input, select, textarea, `[role]`,
 `[data-journey]`, `[contenteditable]`, or `[tabindex]`. If it or its
 ancestors carry `data-journey`, build the path from the chain of
-`data-journey` ancestors (outermost first) using `data-journey-key` values
-where present, and verify with `resolveOne` that it is unique; health
-`stable`. The chain climbs out of a shadow root to its host and out of a
+`data-journey` ancestors (outermost first), adding `data-journey-key` values
+from the innermost segment outwards only until `resolveOne` finds it unique;
+when keys cannot, an `[#i]` index (among visible matches) on each ambiguous
+segment from the outermost. Health `stable`. The panel's "Prefer index over
+key" option tries indexes before keys, so the journey does not name the
+recording user's entities. The chain climbs out of a shadow root to its host and out of a
 same-origin frame to its `<iframe>`, joining those two with `>>`, as long as
 that host or iframe carries `data-journey`. Otherwise try in order `testid`,
 `label`, `role`+`name`, `text`, each verified unique with `resolveOne`
@@ -649,10 +725,10 @@ Sensitive values: `input[type=password]`, `autocomplete` containing
 `/pass|token|secret|otp|card|cvc|ssn/i` are recorded as
 `{ kind: 'fill', value: { $param: 'var.<name-or-id>' }, mask: true }`.
 
-Digest (`digest.ts`): `digest()` returns `{ url, dialogs: string[], alerts: string[], headings: string[], counts: Record<string, number>, focused: string | null }`
-where dialogs are the heading or aria-label text of open `dialog[open]` and
-`[role=dialog]`, alerts are text of `[role=status]`, `[role=alert]`,
-`[aria-live]`, headings are visible `h1`,`h2`,`h3` text, counts are, for each
+Digest (`digest.ts`): `digest()` returns `{ url, dialogs: string[], alerts: string[], headings: string[], counts: Record<string, number>, focused: string | null, targets: Record<string, Target> }`
+where dialogs are the aria-label or heading text of visible `dialog[open]` and
+`[role=dialog]`, alerts are text of visible `[role=status]`, `[role=alert]`,
+`[aria-live]`, targets map each dialog and alert to its located target, headings are visible `h1`,`h2`,`h3` text, counts are, for each
 `[data-journey]` element that has children with `data-journey-key`, the
 path and the visible keyed child count. `suggest(before, after)` returns at
 most three `Expectation`s in this priority: a new dialog (`visible` on its
@@ -660,12 +736,14 @@ path or `{ role: 'dialog', name }`), a url change (`url`), a count change
 (`count` with `equals`), a new alert (`text` on the alert element). Each
 suggestion has a human label.
 
-Panel: step rows show index, target (with a health dot: green stable, amber
+Panel: a "Record hovers" and a "Prefer index over key" checkbox under the
+toolbar, both off by default and persisted with the draft. Step rows show index, target (with a health dot: green stable, amber
 fallback, red fragile), action summary, editable `say.title` and `say.body`,
 a Capture toggle, an expectation list with checkboxes for suggestions and a
 remove button for accepted ones, an "Add expectation" form, and a delete
 button. The form takes a kind, a target picked by clicking an element in the
-page (pick mode outlines the hovered element without scrolling, Escape
+page (pick mode outlines the hovered element without scrolling, picks the
+real element inside open shadow roots and same-origin frames, Escape
 cancels), and a value prefilled from the picked element or the current
 location. A failed row shows the engine's error text. A Values section lists
 every `var.*` parameter the draft references with password inputs; values
@@ -690,7 +768,7 @@ permitted, dispatches `window` event `journey:export` with
 
 ```ts
 interface Driver {
-	load(ir: Journey, opts: { params: Record<string, string>; variant: Record<string, string>; presenter: 'none' | 'doc' | 'spot' | 'guide'; mask?: boolean; pace?: Pace; from?: number }): Promise<{ resumedAt: number | null }>;
+	load(ir: Journey, opts: { params: Record<string, string>; variant: Record<string, string>; presenter: 'none' | 'doc' | 'spot' | 'guide'; placement?: 'anchored' | 'banner'; mask?: boolean; masks?: TargetPath[]; pace?: Pace; from?: number }): Promise<{ resumedAt: number | null }>;
 	step(): Promise<
 		| { done: true; result: RunResult }
 		| { done: false; stepId: string; index: number; route: string }
@@ -707,8 +785,9 @@ or an action (`action`, with `marker` = `data-journey-focus` value, null for
 `none`). After a `route` the host navigates and calls `load` again with the
 same arguments; the engine resumes from progress and `step` continues that
 same step. After an `action` the host performs it on
-`[data-journey-focus="<marker>"]` and calls `acted()`, then `settle()`, which
-waits for expectations and returns the capture spec. The host captures, then
+`[data-journey-focus="<marker>"]`, in whichever frame holds it, and calls
+`acted()`, then `settle()`, which waits for expectations and returns the
+capture spec. The host captures, then
 calls `step()` again. Every promise rejects with a readable message when the
 protocol is used out of order.
 
@@ -724,7 +803,11 @@ itself when the app did not. For the length of a run the flag also sits in
 `sessionStorage` (`journey:run`), and an init script puts it back into the URL
 with `history.replaceState` before the app's scripts on any document the run
 loads without it (a link, a reload, a form post). `runJourney(page, ir, opts)` where opts are
-`{ baseUrl, params, variant, presenter, mask, pace, onCapture?: (spec, ctx) => Promise<void>, applyVariant?: boolean }`.
+`{ baseUrl, params?, variant?, viewports?, presenter?, placement?, mask?, masks?, pace?, onCapture?: (spec, ctx) => Promise<void>, onStep?: (ctx) => void | Promise<void>, applyVariant?: boolean }`;
+`masks` are config `mask` paths applied with the journey's own, and
+`viewports` adds named sizes to the built-in desktop and mobile.
+`onStep` gets `{ index, stepId, title?, body?, at }` for every step the run reaches, with the translated `say`
+and `at` the wall-clock ms its card appeared (when `step()` answered, less the step's `pace.beforeAction`).
 It adds the runtime as an init script on the page's context if not already
 added (track with a WeakSet), sets the viewport for the variant (an unknown
 viewport name throws), navigates to `baseUrl + ir.route`, applies non-viewport
@@ -744,8 +827,10 @@ its timeout runs out. Without this a run that is merely faster (`check` takes no
 screenshots and glides no cursor, so it is) disagrees with a slower one on the
 same journey.
 
-`fixtures.ts`: `applyFixture(name, config, ctx)` runs `command` and polls
-`ready` (default `app.url`) until 200 or `timeout`, returns a stop function;
+`fixtures.ts`: `applyFixture(name, config, ctx)` runs `command`: with `ready`
+as a server, polling `ready` until it answers any status below 500 (redirects
+not followed) within `app.timeout`, stopped after the run; without `ready` to
+completion, failing unless it exits 0 within `app.timeout`. Returns a stop function;
 `routeFromHAR(har, { url: harUrl, notFound })` on the context; `storageState`
 is applied once per context: cookies with `addCookies`, local storage by an
 init script that runs on the first document of each origin per tab only; `setup` returns params merged under
@@ -753,9 +838,12 @@ init script that runs on the first document of each origin per tab only; `setup`
 `var.*` and the variant under `variant.*`.
 
 `index.ts`: `export const test = base.extend<{ journey: JourneyFixture }>()`
-with `journey.run(idOrIr, opts?)` that loads config from
-`process.env.JOURNEY_CONFIG` (or `journey.config.ts` in cwd) and runs one
-journey in the current page with fixtures applied. `journeyTests(configPath?)`
+with `journey.run(idOrIr, opts?)` (opts `{ variant?, presenter?, placement?, mask?, onCapture?, onStep? }`)
+that loads config from `process.env.JOURNEY_CONFIG` (or `journey.config.ts`
+in cwd) and runs one journey in the current page with fixtures applied, and
+`journey.config()` that returns the loaded config and journeys. It never
+starts `app.start` and does not read `test`: the app must already answer at
+`app.url`, for example through the suite's own `webServer`. `journeyTests(configPath?)`
 registers, at import time, one `test` per journey and variant named
 `<id> [<dim>=<value> ...]`, applying `level`: `smoke` and `checked` just run;
 `visual` also compares each capture screenshot with
@@ -766,7 +854,10 @@ registers, at import time, one `test` per journey and variant named
 `fullyParallel: true`, `use.trace: 'retain-on-failure'`,
 `use.screenshot: 'only-on-failure'`, `retries` 1 under `CI` else 0, and
 reporters `github` under `CI` (else `list`) plus `html` to `<out>/.test-report`
-with `open: 'never'`.
+with `open: 'never'`. Config `test` then overrides `retries`, `workers`,
+`fullyParallel`, `timeout`, `maxFailures`, `forbidOnly` and `expect`, and its
+`use` is merged over the `use` defaults; other keys are ignored. Playwright CLI
+flags still win over both.
 
 `capture.ts`: `captureStep(page, spec, ctx)` returns a PNG buffer of the
 full viewport, or clipped to the bounding box of the target or the given path
@@ -776,15 +867,16 @@ before the run and `stop()` after, when requested.
 ## 9. CLI
 
 `journey <command> [options]`; hand-written argv parsing; `--config <path>`
-defaults to `journey.config.ts` in cwd; `--help` per command; exit code 1 on
-any failure; concise output, one line per journey and variant with a check
-or cross.
+defaults to `$JOURNEY_CONFIG`, else `journey.config.ts` in cwd; `--help` per
+command, `--version`; exit code 1 on any failure; concise output, one line per
+journey and variant with a check or cross. `check`, `test`, `book` and `pages`
+take `--headed` and `--slow-mo <ms>` (Playwright's `slowMo`).
 
 - `compile [--public] [-o file]`: validates every journey, writes JSON array
   of IR to `-o` or prints; non-zero on validation errors listing
   `file: path: message`.
-- `check [id...] [--strict] [--json] [--variant dim=value]`: starts the app
-  when `app.start` is set, runs the selected journeys and variants (default
+- `check [id...] [--strict] [--json] [--variant dim=value]`: starts `app.start`
+  when `app.ready` (else `app.url`) does not answer, runs the selected journeys and variants (default
   all; ids and `--variant` as for `book`, an unknown one exits 1 naming the
   valid ones) with presenter `none` at smoke level, prints a line per run
   with pass or fail and the number of fallback and fragile targets, exit 1 on
@@ -803,21 +895,23 @@ or cross.
 - Config `vars` are merged with the JSON object in the `JOURNEY_VARS`
   environment variable when set, so secrets never have to be written down.
   Invalid JSON fails naming `JOURNEY_VARS`.
-- Every command rejects an option it does not take, and a value option
-  (`--config`, `-o`, `--variant`, ...) with no value, exit 1.
+- Every command but `test` (which forwards unknown options) rejects an option
+  it does not take, and every command a value option (`--config`, `-o`,
+  `--variant`, ...) with no value, exit 1.
 - `test [playwright args...]`: spawns `npx playwright test -c <dist>/playwright/journeys.config.js`
   with `JOURNEY_CONFIG` set to the absolute config path and passes back the
   exit code. After `test`, journey consumes only `--config`, `--headed`,
   `--slow-mo` and `--help`; every other argument (`--grep`, `-g`, `--shard`,
   `--workers`, files...) is forwarded verbatim and in order, and everything
   after `--` is forwarded untouched.
-- `record [url] [-o dir] [--har] [--no-har] [--storage-state] [--viewport name]`:
+- `record [url] [-o dir] [--no-har] [--storage-state] [--viewport name] [--headless]`:
   loads the config when `--config` is given or the default one exists; the
   url defaults to `app.url` and a leading-`/` url is resolved against it,
-  `app.start` is started when the app does not answer and stopped at the end,
+  `app.start` is started when `app.ready` (else `app.url`) does not answer and stopped at the end,
   the default dir is the fixed prefix of the first `journeys` pattern (else
   `journeys`), and the window takes the first `variants.viewport` size or
-  `--viewport`'s. Launches headed Chromium with the runtime and editor
+  `--viewport`'s. Launches headed Chromium (headless with `--headless`, which
+also stops at the first export) with the runtime and editor
   injected and `editor: true`, in every page of the context (tabs and
   popups included). The export binding takes only `{ ir }` from a page's main
   frame; the CLI validates and compiles it and writes `<dir>/<id>.journey.ts`
@@ -833,7 +927,9 @@ or cross.
   secret-bearing files, the paths it writes, and at the end the `fixtures`
   config entry and `fixture` field that replay the journey from them; exits 1
   when nothing was exported.
-- `book [id...] [--presenter doc|spot|guide|none] [--video] [--variant dim=value]`: journeys
+- `book [id...] [--presenter doc|spot|guide|none] [--placement anchored|banner] [--video] [--variant dim=value]`:
+  presenter and placement default to config `presenter` (else `doc`) and
+  `placement` (else `anchored`); journeys
   are compiled with `public: false`: a `qaOnly` step is hidden from the app
   guide but still runs and captures in the book, so the storyboard matches
   what QA exercises; for each journey and variant runs with the chosen presenter, captures every
@@ -842,8 +938,8 @@ or cross.
   `tour.webm` when `--video` or any capture has `video`, converts to `mp4`
   and `gif` when ffmpeg exists (formats from config, default webm and mp4),
   writes `storyboard.png`, `manifest.json`, `index.md`, `index.html`, and with
-  a video `tour.vtt`: one cue per capture with a `say` title or body, from the
-  capture's time since the video started to the next capture (the last to the
+  a video `tour.vtt`: one cue per step with a `say` title or body, from the
+  `onStep` time since the video started to the next step (the last to the
   end of the video). When a configured `mp4` or `gif` needs ffmpeg and it is
   missing, one warning on stderr. A screenshot that fails with the transient
   `Unable to capture screenshot` protocol error is retried twice, 100 ms
@@ -963,7 +1059,7 @@ variant handler.
 
 ## 11. Tests
 
-Unit (`tests/unit`):
+Unit (`tests/unit`), among others:
 
 - `target.test.ts`: parse and format round trip, param keys, errors.
 - `validate.test.ts`: valid journey passes; rejects duplicate step ids,
@@ -983,9 +1079,18 @@ Unit (`tests/unit`):
 - `print.test.ts`: `print(compile(j))` is stable: compiling the printed
   source again (write to a temp file, dynamic import) yields deep-equal IR;
   `msg` and `param` round trip; output uses tabs and single quotes.
+- `engine.test.ts`, `driver.test.ts`, `actors.test.ts`, `text.test.ts`: the
+  engine step loop, timeouts, `when`/`optional` skips, every expectation kind,
+  masks, abort and resume; the driver protocol order and resume; the dom,
+  human, stepped and driver actors; text, param and string resolution. They
+  run against `fake-dom.ts`, a minimal DOM installed on `globalThis`.
+- `cli-helpers.test.ts`: the pure CLI and Playwright-side helpers (variant
+  matrix, filters, env vars, flags, crop, screenshot retry, report and pages
+  rendering).
 
-Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
-`addInitScript` unless it uses the demo's own `?journey=` mount:
+Browser (`tests/browser`), among others; each spec injects
+`dist/runtime.iife.js` with `addInitScript` unless it uses the demo's own
+`?journey=` mount:
 
 - `resolve.spec.ts`: path resolution, keyed segments, six identical Like
   buttons are ambiguous, `nth` picks one, role and name fallback, label
@@ -1018,7 +1123,10 @@ Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
   include the dialog and the count change; accept them; export produces
   source that `compile`s and, when run through `runJourney`, passes. Also
   record a click on a Like button and assert health `fragile` with a `css`
-  locator, and a password fill recorded as a masked param.
+  locator, a password fill recorded as a masked param, an unkeyed repeated
+  element recorded as `[#i]`, "Prefer index over key", hovers on a dwell, no
+  press for Tab or Enter in a textarea, and a resumed run that still gets the
+  Values.
 - `cli.spec.ts`: run `node dist/cli/main.js compile --config demo/journey.config.ts`,
   `check`, `book create-note --variant viewport=desktop`, `pages`, using
   the demo server that the Playwright config already started (config
@@ -1034,5 +1142,11 @@ Browser (`tests/browser`), each spec injects `dist/runtime.iife.js` with
   `check` print the install hint, and a strip-only failure in `compile`
   states the supported subset.
 
+`scripts/pack-smoke.mjs` (CI, after the build): packs the package, installs
+the tarball with `--engine-strict` in a temp project, imports and requires
+every entry, checks the peer hint without `@playwright/test`, runs
+`journey --version`, type-checks ESM and CommonJS consumers, and fails on
+shipped source maps.
+
 All tests must pass with `npm test` locally and in CI on Ubuntu with
-Chromium only.
+Chromium only, on Node 24 and 26.

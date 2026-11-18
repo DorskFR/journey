@@ -247,7 +247,7 @@ class OverlayImpl implements Overlay {
 
 	target(): DOMRect | null {
 		if (!this.current?.isConnected) return null;
-		const rect = this.current.getBoundingClientRect();
+		const rect = viewportRect(this.current);
 		return rect.width === 0 && rect.height === 0 ? null : rect;
 	}
 
@@ -326,6 +326,30 @@ class OverlayImpl implements Overlay {
 			el.style.left = `${clamp(rect.left, 12, Math.max(12, vw - w - 12))}px`;
 		}
 	}
+}
+
+// An element inside a frame measures from the frame's viewport, so each
+// frame's content-box origin is added on the way up to this window.
+export function viewportRect(el: Element): DOMRect {
+	const rect = el.getBoundingClientRect();
+	let x = rect.x;
+	let y = rect.y;
+	let view = el.ownerDocument.defaultView;
+	while (view && view !== window) {
+		let frame: Element | null;
+		try {
+			frame = view.frameElement;
+		} catch {
+			break;
+		}
+		if (!frame) break;
+		const box = frame.getBoundingClientRect();
+		const style = getComputedStyle(frame);
+		x += box.x + frame.clientLeft + Number.parseFloat(style.paddingLeft);
+		y += box.y + frame.clientTop + Number.parseFloat(style.paddingTop);
+		view = frame.ownerDocument.defaultView;
+	}
+	return x === rect.x && y === rect.y ? rect : new DOMRect(x, y, rect.width, rect.height);
 }
 
 export interface SpotBox {

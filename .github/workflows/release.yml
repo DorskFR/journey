@@ -30,6 +30,8 @@ jobs:
       - run: npm run lint
       - run: npm run check
       - run: npm test
+      - name: Packaging smoke test
+        run: node scripts/pack-smoke.mjs
       # Idempotent: a re-run or a hand-published first version goes green.
       # No `npm view` pre-check: the registry read endpoint lags minutes behind
       # a publish and would turn the skip into a failed duplicate publish.

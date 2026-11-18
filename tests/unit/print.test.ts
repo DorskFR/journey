@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { expect, test } from '@playwright/test';
 import type { Journey } from '../../src/index.js';
@@ -11,8 +11,12 @@ async function reimport(source: string, name: string): Promise<Journey> {
 	mkdirSync(tmpDir, { recursive: true });
 	const file = new URL(`${name}-${Date.now()}.journey.ts`, tmpDir);
 	writeFileSync(file, source.replace("from '@dorsk/journey'", `from '${indexUrl}'`));
-	const mod = (await import(file.href)) as { default: Journey };
-	return mod.default;
+	try {
+		const mod = (await import(file.href)) as { default: Journey };
+		return mod.default;
+	} finally {
+		rmSync(file, { force: true });
+	}
 }
 
 const journey = defineJourney({

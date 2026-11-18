@@ -287,7 +287,7 @@ test.describe('book and pages', () => {
 		const vtt = readFileSync(join(dir, 'tour.vtt'), 'utf8');
 		expect(vtt.startsWith('WEBVTT\n\n1\n00:00:')).toBe(true);
 		const cues = [...vtt.matchAll(/^(\d\d:\d\d:\d\d\.\d{3}) --> (\d\d:\d\d:\d\d\.\d{3})\n(.+)$/gm)];
-		expect(cues.map((cue) => cue[3])).toEqual(['Welcome', 'New note', 'Save']);
+		expect(cues.map((cue) => cue[3])).toEqual(['Welcome', 'New note', 'Title', 'Category', 'Save']);
 		for (const [, start, end] of cues) expect((start as string) < (end as string)).toBe(true);
 		const webm = join(dir, 'tour.webm');
 		const mp4 = join(dir, 'tour.mp4');
@@ -396,6 +396,16 @@ test.describe('book and pages', () => {
 		const captures = manifest.variants[key]?.captures ?? [];
 		expect(captures).toHaveLength(1);
 		expect(captures[0]?.title).toBeTruthy();
+	});
+
+	test('an unknown journey id lists the configured ones, like check', async () => {
+		for (const command of ['book', 'check']) {
+			const run = await journey([command, 'create-nte', '--config', config]);
+			expect(run.code).toBe(1);
+			expect(run.stderr).toContain(
+				`journey ${command}: "create-nte" not among the configured journeys: create-note, settings-theme`,
+			);
+		}
 	});
 
 	test('an unknown presenter names the ones that exist', async () => {

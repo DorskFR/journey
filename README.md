@@ -9,6 +9,13 @@ npm i -D @dorsk/journey @playwright/test
 
 `@playwright/test` is an optional peer: an app that only ships the guide or
 the editor installs `@dorsk/journey` alone (see [In the app](#in-the-app)).
+The CLI and the Playwright side need Node 24 or later.
+
+`.` and `./playwright` ship ES modules and CommonJS copies, each with its own
+types. `./runtime` and `./editor` are ES modules only: bundlers import them,
+and `require()` loads them through Node's require of ES modules. TypeScript
+types such a `require` with `"module": "nodenext"`; under `node16` use
+`import()`.
 
 One declarative `.journey.ts` file per flow. One in-page engine that runs it
 four ways:
@@ -26,7 +33,11 @@ npx journey check                           # every journey resolves and runs
 npx journey test                            # journeys as Playwright tests
 npx journey book                            # screenshots, video, storyboard, markdown
 npx journey pages                           # a screenshot per route and variant
+npx journey compile                         # validate, print the compiled journeys as JSON
 ```
+
+Every command takes `--config <path>` (default `$JOURNEY_CONFIG`, else
+`journey.config.ts`) and `--help`.
 
 ## A journey
 
@@ -77,7 +88,10 @@ elements will do, index instead of keying: `notes/note[#0]/delete` is the
 first visible note's button, `note[#-1]` the last. That keeps a journey
 user-agnostic — it clicks through to whatever the reader actually has,
 instead of naming an entity only your fixtures contain — and an indexed path
-is still a path, so `journey check --strict` accepts it.
+is still a path, so `journey check --strict` accepts it. The recorder keys a
+segment only when the element has a `data-journey-key` and the path needs
+it, and indexes when keys can't make the path unique; tick "Prefer index over
+key" in its panel to index first.
 
 `>>` crosses into an open shadow root or a same-origin iframe:
 `settings/color-picker>>swatch[red]` is a `data-journey="swatch"` element
@@ -85,12 +99,26 @@ inside the shadow root of `<color-picker data-journey="color-picker">`, and
 `checkout/payment>>card-number` one inside `<iframe data-journey="payment">`.
 A locator scopes to the same place with `within: 'checkout/payment>>'`. `/`
 alone never crosses, so annotate the host or the iframe to reach inside it.
-Closed shadow roots and cross-origin frames can't be targeted.
+The guide overlay, the actors, `journey test` and the editor's picker all
+work on those targets, through nested frames too. Closed shadow roots and
+cross-origin frames can't be targeted, and the overlay places a framed
+target from the iframe's box, so a CSS transform or zoom on the iframe puts
+the spotlight off target.
 
 Without attributes the recorder falls back to accessible role and name,
 labels, test ids and text, and `journey check --strict` tells you which
 targets still need one: it fails the journey and lists each of them under it,
 `  step save: fallback {"role":"button","name":"Save"}`.
+
+The recorder writes a `press` for Enter, Escape and the arrow keys, but not
+for Tab, nor for Enter inside a textarea or contenteditable, where it is
+text. With "Record hovers" ticked, resting the pointer on an element for
+500 ms records a `hover` (for tooltips and menus); clicking that element
+right after keeps only the click.
+
+A `check` step needs a visible target: for a native checkbox a design system
+hides behind its label, `click` the label and assert `{ checked: [box, true] }`,
+which accepts the hidden input when its label is visible.
 
 ## Config
 
@@ -120,6 +148,21 @@ falls back to Node type stripping: relative imports need their `.ts`
 extension, and enums, namespaces, parameter properties and `tsconfig` paths
 are not supported.
 
+`app.start` and a fixture `command` with a `ready` URL are servers: the run
+waits until that URL (`app.ready`, else `app.url`) answers with any status
+below 500, so a login redirect or a 404 counts as up. Under `journey test`,
+`app.start` is Playwright's `webServer`, which counts only 2xx, 3xx and
+400-403 as up. A fixture `command` without `ready` is a setup script (seed a
+database, reset a mock): it runs before the journey and must exit 0 within
+`app.timeout`.
+
+A fixture's `setup({ baseUrl, request })` may return params, read as
+`fixture.<key>` like its `params`. `request` is Playwright's request context,
+typed as the `FixtureRequest` subset (`get`, `post`, `put`, `patch`,
+`delete`, `head`, `fetch`) so the config's types need no `@playwright/test`.
+`JOURNEY_VARS`, a JSON object, is merged over `vars`, so secrets stay out of
+the config.
+
 `journey record` reads the config when there is one: the url defaults to
 `app.url` (a bare path such as `/settings` is resolved against it), `app.start`
 is started when the app does not answer, the journey lands in the directory of
@@ -127,18 +170,18 @@ the first `journeys` pattern, and the window takes the size of the first
 `variants.viewport` (`--viewport mobile` for another one). Without a config it
 needs a url and writes to `./journeys`.
 
-It also saves a HAR to `journeys/fixtures/<id>.har`, one per exported journey,
+It also saves a HAR to `fixtures/<id>.har` in that directory, one per exported journey,
 holding the whole session, so the journey replays offline (`--no-har` to skip).
 Auth and cookie headers and request bodies with a secret field are removed, but
 response bodies stay: review the HAR before committing it. The raw HAR is kept
-in `.journey/` while recording and removed at the end, Ctrl-C included.
-`--storage-state` also saves cookies and local storage to
+in `.journey/`, next to the config, while recording and removed at the end,
+Ctrl-C included. `--storage-state` also saves cookies and local storage to
 `.journey/<id>.storage.json`, a self-gitignored directory outside the
 journeys; it holds live session tokens, so never commit it. When it stops,
 `record` prints the `fixtures` entry to paste into the config and the
 `fixture: '<id>'` to add to the journey so it replays from those files.
 
-`check`, `book` and `pages` start `app.start` when `app.url` does not answer,
+`check`, `book` and `pages` start `app.start` when `app.ready` (else `app.url`) does not answer,
 and stop it on every exit, Ctrl-C included. When it never answers, the error
 ends with the last 40 lines it printed.
 
@@ -161,8 +204,8 @@ disk.
 
 Each booked variant gets `index.md` and `index.html`, a standalone UTF-8 page
 with only relative links, so it opens straight from disk. With a video, `book`
-also writes `tour.vtt`, a WebVTT caption track with each captured step's `say`
-title and body, shown from that capture until the next: the page plays the
+also writes `tour.vtt`, a WebVTT caption track with each step's `say` title
+and body, shown from when the step's card appears until the next step: the page plays the
 video with it, and a `spot` or `none` video keeps its text toggleable and
 translatable. The storyboard draws every capture at its own aspect ratio, so a
 `crop: 'target'` capture is letterboxed instead of stretched. Without ffmpeg,
@@ -278,7 +321,9 @@ page re-renders is found again.
 
 Escape exits the guide, unless the page handled it first (`preventDefault()`),
 focus is in an open dialog, popover, menu or listbox or on an expanded
-control, or the step itself asks the user to press Escape.
+control, or the step itself asks the user to press Escape. Enter, Space and
+ArrowRight press Next while focus is on the card or the page body; on a page
+button, slider, tab list or other control they go to that control.
 
 Keyboard users are not dropped on `<body>`: a card with Next focuses it, a
 step waiting for the user focuses its target (or the card) when focus was
@@ -290,7 +335,8 @@ the spotlight, cursor and ripple motion.
 Preview and run mode act on the page the way a user does: a click is the
 whole `pointerdown`…`click` sequence with coordinates, a fill is a native
 edit (React, Vue and contenteditable editors see it), Enter submits a form
-and Tab moves focus, and selecting an option that does not exist fails the
+and Tab moves focus (within the target's own document, never into or out of
+an iframe), and selecting an option that does not exist fails the
 step.
 
 `register` resolves once a resumed or autostarted run has been picked up, so
@@ -306,6 +352,8 @@ second to `localStorage`, which keeps them in one browser.
 Pass a `storage` adapter to put them somewhere else — a user record on the
 server, so a guide half-finished on a laptop carries on at a desk, and the
 backend can decide to show it again. It may be async, and it replaces both.
+Progress reads, writes and removes are made one at a time, each after the
+previous one settled.
 
 ```ts
 mount({
@@ -440,8 +488,9 @@ export default defineConfig({ pace: { beforeAction: 600, afterSettle: 2500 } });
 { id: 'summary', say: { body: 'The long one.' }, pace: { afterSettle: 5000 } }
 ```
 
-Both `presenter` and `pace` on a step apply to scripted runs — `book`, the
-Playwright runner, `mount` in run mode. A guided or preview run ignores them:
+Config `pace` applies to `book`. Both `presenter` and `pace` on a step apply
+to every scripted run — `book`, `journey test`, `journey.run`, `mount` in run
+mode. A guided or preview run ignores them:
 there the presenter is the only way a person has through the journey, so a step
 may not take it away or stall them.
 
@@ -520,8 +569,9 @@ move the variables.
 ## In CI
 
 `journey test` runs one Playwright test per journey and variant, spread
-across workers. Every argument other than `--config`, `--headed` and
-`--slow-mo` goes to `playwright test` as written:
+across workers. Every argument other than `--config`, `--headed`, `--slow-mo`
+and `--help` goes to `playwright test` as written, and everything after `--`
+goes untouched, those four included:
 
 ```sh
 npx journey test --shard 1/4 --workers 4 --grep create-note --reporter dot
@@ -529,8 +579,17 @@ npx journey test --shard 1/4 --workers 4 --grep create-note --reporter dot
 
 A failed test keeps its trace and screenshot in `<out>/.test-results/`, and
 an html report is written to `<out>/.test-report/`. Under `CI` a failure is
-retried once. Flags such as `--workers`, `--retries`, `--trace` and
-`--reporter` override these defaults.
+retried once. A `test` key in the config sets the team's defaults for
+`retries`, `workers`, `fullyParallel`, `timeout`, `maxFailures`,
+`forbidOnly`, `expect` and `use` (`trace`, `screenshot`, `video`, any other
+Playwright `use` option):
+
+```ts
+export default defineConfig({ test: { retries: 2, workers: '50%', use: { trace: 'on-first-retry' } } });
+```
+
+Flags such as `--workers`, `--retries`, `--trace` and `--reporter` override
+these defaults.
 
 `journey check` takes journey ids and `--variant dim=value` like `book`, and
 `--json` prints one report on stdout instead of a line per run:
@@ -560,8 +619,9 @@ A journey's `ok` is false when a run failed or, under `--strict`, when it has
 an unstable target. `errors` holds journeys that do not load and bad arguments
 (an unknown id or variant); `failures[].step` is missing when the run broke
 outside a step. `check` exits 0 when `ok` is true, 1 otherwise. Every command
-exits 1 on an option it does not take (`--strcit`) and on a value option with
-no value (`--config` alone).
+exits 1 on a value option with no value (`--config` alone), and every command
+but `test`, which hands unknown options to Playwright, on an option it does
+not take (`--strcit`).
 
 ## Existing Playwright suite
 
@@ -573,5 +633,12 @@ test('create a note', async ({ journey }) => {
 	expect(result.ok).toBe(true);
 });
 ```
+
+`journey.run(id, { variant, presenter, placement, mask })` loads
+`$JOURNEY_CONFIG` or `journey.config.ts` from the working directory, applies
+the journey's fixture and runs its first variant unless `variant` names one.
+It does not start `app.start` or read the config's `test` key: start the app
+with your suite's `webServer`. The config's `mask` and `pace` apply only with
+`mask: true`.
 
 Status: early. The API will move until 1.0. `SPEC.md` is the design.
