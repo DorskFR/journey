@@ -479,14 +479,34 @@ Unresolved refs fail the step with a clear error.
   literal, the element value equals it. For `select` and `check` resolve on
   `change`. For `press` resolve on a matching `keydown`. For `hover` resolve
   on `pointerenter`. For `none` resolve when the presenter's Next is pressed.
-- `domActor`: `click` calls `el.click()`; `dblclick` dispatches `dblclick`;
-  `fill` focuses, sets the value through the native value setter of
-  `HTMLInputElement`/`HTMLTextAreaElement` prototypes, then dispatches
-  `input` and `change`; `select` sets `value` and dispatches `change`;
-  `check` sets `checked` and dispatches `input` and `change`; `press`
-  dispatches `keydown`, `keypress`, `keyup` with `key` and matching `code` on
-  `el`; `hover` dispatches `pointerover`, `pointerenter`, `mouseover`,
-  `mouseenter`; `navigate` assigns `location.href`.
+- `domActor` dispatches the sequence a real user produces, so component
+  libraries that listen past `click` (menus opening on `pointerdown`,
+  controlled inputs with value trackers) behave as in a guide. `hover`
+  dispatches `pointerover`, `pointerenter`, `mouseover`, `mouseenter`,
+  `pointermove`, `mousemove` at the element's centre. `click` hovers, then
+  dispatches `pointerdown`, `mousedown`, focuses the nearest focusable
+  ancestor (or blurs), `pointerup`, `mouseup`, `click`, all with coordinates;
+  a cancelled `pointerdown` suppresses `mousedown`/`mouseup`, a cancelled
+  `mousedown` keeps focus where it is, and a disabled control gets nothing.
+  It works on SVG targets. `dblclick` runs the press twice (`detail` 1, 2)
+  then dispatches `dblclick`. `fill` focuses, selects the content and edits
+  it with `document.execCommand('insertText')` (`delete` for an empty value)
+  so the browser performs a native edit; for non-text inputs, or when the
+  command does nothing, it sets the value through the prototype's native
+  setter between `beforeinput` and `input` `InputEvent`s (`insertText`).
+  Inputs and textareas then get `change`; `contenteditable` targets are
+  supported. `select` matches an option by value, then by label, sets it
+  through the native setter and dispatches `input` and `change`, and fails
+  the step when no option matches. `check` clicks the box when its state
+  differs, and fails the step when the click did not change it (unchecking a
+  radio sets it directly). `press` takes `Key` or `Mod+Key` (`Shift`,
+  `Control`, `Alt`, `Meta`), focuses the target unless focus is already in
+  it, and dispatches `keydown`, `keypress` (printable keys and Enter only)
+  and `keyup` on the focused element; when not cancelled, Tab and Shift+Tab
+  move focus, Enter activates a button or link or implicitly submits the
+  field's form (`requestSubmit`, not when its submit button is disabled),
+  Space activates buttons and checkboxes, and a printable key is typed into
+  a focused text field. `navigate` assigns `location.href`.
 - `driverActor`: sets `data-journey-focus="<stepId>"` on the element, yields
   `{ action }` to the host through the driver protocol, resolves when the
   host calls `driver.acted()`, then removes the attribute.
@@ -502,7 +522,13 @@ overflow:visible; pointer-events:none`. Interactive children opt in with
 `HTMLElement.prototype.showPopover` and `togglePopover` so that after each
 call `overlay.raise()` runs (`hidePopover(); showPopover()`), keeping the
 overlay above modal dialogs and popovers. A comment on the patch explains the
-top-layer constraint. `overlay.remove()` restores the prototypes.
+top-layer constraint. A modal dialog makes the rest of the document inert,
+the top layer included, so while one is open the overlay host is moved into
+the topmost modal dialog, where the card's buttons stay clickable and
+focusable. A MutationObserver on `open` attributes and child lists moves it
+back to `<html>` (or into the next modal) as soon as that dialog closes or
+is removed. `overlay.remove()` restores the prototypes and disconnects the
+observer.
 
 Overlay parts, all inside the shadow root: `spot` (spotlight, absolute box
 with `box-shadow: 0 0 0 3px <accent>, 0 0 0 9999px rgba(0,0,0,.55)` for
@@ -517,6 +543,8 @@ banners inject and smooth scrolls stay in flight without reporting any event,
 and a rect measured once leaves the box on the wrong element. The per-frame
 pass re-measures only, and lays out again only when the rect changed. The
 `spot` transition is 80 ms so a correction cannot slide across the page.
+Under `prefers-reduced-motion: reduce` the spot and cursor have no
+transition and the ripple no animation.
 Escape exits guide and preview runs; driven runs ignore it, and so does every
 run for an untrusted (scripted) keystroke. It is handled on `window` in the
 bubble phase, after the page, and is ignored when the page called
@@ -533,7 +561,14 @@ button reads the `next` string followed by `<kbd>↵</kbd>` and Exit reads the
 `exit` string followed by `<kbd>Esc</kbd>`; other runs show no hints. When a
 card with a Next button is shown, that button receives focus
 (`preventScroll`) so Enter and Space work even when the previous step left
-focus in an input; wait-for-user steps do not move focus. Keys typed into an
+focus in an input. A card without Next moves focus only when it was lost
+(on `body`) or inside the overlay, so a user typing in the page is never
+pulled away: a step the user acts on focuses its target, and otherwise (or
+when the target cannot take focus) the card itself (`tabindex=-1`). When the
+guide ends, focus returns to the element that had it before the tour if
+focus is lost or in the overlay. The card is `role=dialog` `aria-live=polite`,
+its `aria-label` is the step title (removed when the step has none) and
+`aria-describedby` points at the body. Keys typed into an
 editable element outside the overlay are ignored.
 
 Colors: accent `#ffd166`, text `#111`, card background `#fff`, dim

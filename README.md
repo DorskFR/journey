@@ -248,6 +248,19 @@ Escape exits the guide, unless the page handled it first (`preventDefault()`),
 focus is in an open dialog, popover, menu or listbox or on an expanded
 control, or the step itself asks the user to press Escape.
 
+Keyboard users are not dropped on `<body>`: a card with Next focuses it, a
+step waiting for the user focuses its target (or the card) when focus was
+lost, and leaving the guide puts focus back where it was before the tour.
+Focus is never taken from a field the user is typing in. The card's label and
+description follow the current step, and `prefers-reduced-motion` turns off
+the spotlight, cursor and ripple motion.
+
+Preview and run mode act on the page the way a user does: a click is the
+whole `pointerdown`…`click` sequence with coordinates, a fill is a native
+edit (React, Vue and contenteditable editors see it), Enter submits a form
+and Tab moves focus, and selecting an option that does not exist fails the
+step.
+
 `register` resolves once a resumed or autostarted run has been picked up, so
 `await` it before reading `window.__journey.engine()`.
 
@@ -430,7 +443,10 @@ own tooltip and clicking it still reaches the app even where the callout covers
 it. Only the guide card's buttons accept clicks.
 
 The overlay itself sits in the top layer, above everything the page can stack.
-Set `--journey-z` to take it out of the top layer and into the normal stacking
+While the app has a modal `<dialog>` open, the overlay moves inside it, because
+a modal dialog makes the rest of the page inert: the card's Exit and Next stay
+clickable and reachable with Tab. It moves back when the dialog closes or is
+removed. Set `--journey-z` to take it out of the top layer and into the normal stacking
 order at that z-index, so the app's own popovers can come out in front:
 
 ```css
