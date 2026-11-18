@@ -140,10 +140,23 @@ viewport=mobile`), and an unknown dim or value exits 1 with the valid ones.
 The journey's `manifest.json` and index keep the variants already booked on
 disk.
 
+Each booked variant gets `index.md` and `index.html`, a standalone UTF-8 page
+with only relative links, so it opens straight from disk. With a video, `book`
+also writes `tour.vtt`, a WebVTT caption track with each captured step's `say`
+title and body, shown from that capture until the next: the page plays the
+video with it, and a `spot` or `none` video keeps its text toggleable and
+translatable. The storyboard draws every capture at its own aspect ratio, so a
+`crop: 'target'` capture is letterboxed instead of stretched. Without ffmpeg,
+`book` keeps `tour.webm` and says it skipped `mp4` and `gif`.
+
 `pages` names each route's directory after its path, query and hash in
 lowercase letters, digits and `-`: `/` is `home`, `/users/1/edit` is
 `users-1-edit`, `/?tab=2` is `tab-2`. Two routes with one name (`/notes` and
-`/#notes`) fail: give one a `name`.
+`/#notes`) fail: give one a `name`. A page can name a `fixture` for its storage
+state and HAR (`{ route: '/account', fixture: 'signedIn' }`); without one, the
+config's `storageState` applies. `pages` blurs the config's `mask` targets,
+waits for the network to go idle (up to 5 s), and shoots with animations and
+transitions stopped and the caret hidden, so reruns give the same image.
 
 Journey ids, step ids, capture names and variant values become file names, so
 they must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` (`create-note`, `step_2.a`).

@@ -148,7 +148,15 @@ export interface Config {
 	variants?: Record<string, Record<string, unknown> | string[]>;
 	fixtures?: Record<string, Fixture>;
 	vars?: Record<string, string>;
-	pages?: Array<string | { route: string; name?: string; variants?: Record<string, string[]> }>;
+	pages?: Array<
+		| string
+		| {
+				route: string;
+				name?: string;
+				fixture?: string;
+				variants?: Record<string, string[]>;
+		  }
+	>;
 	mask?: TargetPath[];
 	storageState?: string;
 	presenter?: PresenterName;

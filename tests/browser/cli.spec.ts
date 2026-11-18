@@ -276,8 +276,18 @@ test.describe('book and pages', () => {
 		expect(md).toContain('![notes](01-notes.png)');
 		expect(md).toContain('**Welcome**');
 		const html = readFileSync(join(dir, 'index.html'), 'utf8');
+		expect(html.startsWith('<!doctype html>')).toBe(true);
+		expect(html).toContain('<meta charset="utf-8">');
 		expect(html).toContain('<figure>');
 		expect(html).toContain('<strong>Welcome</strong>');
+		expect(html).toContain('<track kind="captions" src="tour.vtt"');
+		expect(html).toContain('<img src="storyboard.png" alt="Storyboard">');
+		expect(variant?.captions).toBe('tour.vtt');
+		const vtt = readFileSync(join(dir, 'tour.vtt'), 'utf8');
+		expect(vtt.startsWith('WEBVTT\n\n1\n00:00:')).toBe(true);
+		const cues = [...vtt.matchAll(/^(\d\d:\d\d:\d\d\.\d{3}) --> (\d\d:\d\d:\d\d\.\d{3})\n(.+)$/gm)];
+		expect(cues.map((cue) => cue[3])).toEqual(['Welcome', 'New note', 'Save']);
+		for (const [, start, end] of cues) expect((start as string) < (end as string)).toBe(true);
 		const webm = join(dir, 'tour.webm');
 		const mp4 = join(dir, 'tour.mp4');
 		expect(existsSync(webm) || existsSync(mp4)).toBe(true);
@@ -394,6 +404,69 @@ test.describe('book and pages', () => {
 			expect(md).toContain(`| ![${key}](${name}/${key}.png)`);
 		}
 		expect(md.match(/^\| !\[/gm)).toHaveLength(3);
+	});
+
+	test('pages applies the fixture storage state and the config masks', async ({ page }) => {
+		test.setTimeout(120000);
+		const dir = mkdtempSync(join(tmpdir(), 'journey-pages-'));
+		try {
+			writeFileSync(
+				join(dir, 'state.json'),
+				JSON.stringify({
+					origins: [{ origin: BASE, localStorage: [{ name: 'theme', value: 'dark' }] }],
+				}),
+			);
+			const shoot = async (name: string, mask: string[]): Promise<string> => {
+				const file = join(dir, `${name}.config.js`);
+				writeFileSync(
+					file,
+					`export default ${JSON.stringify({
+						app: { url: BASE },
+						out: name,
+						variants: { viewport: { desktop: { width: 1280, height: 800 } } },
+						fixtures: { dark: { storageState: 'state.json' } },
+						pages: [{ route: '/', name: 'home', fixture: 'dark' }],
+						mask,
+					})};\n`,
+				);
+				const run = await journey(['pages', '--config', file]);
+				expect(run.code, run.stdout + run.stderr).toBe(0);
+				return join(dir, name, 'pages', 'home', 'desktop.png');
+			};
+			const plain = await shoot('plain', []);
+			const masked = await shoot('masked', ['nav']);
+			await page.goto(BASE);
+			const nav = await page.locator('nav').boundingBox();
+			if (!nav) throw new Error('no nav');
+			const pixels = async (png: string, x: number, y: number, w: number, h: number) =>
+				page.evaluate(
+					async ([src, box]) => {
+						const img = new Image();
+						img.src = src;
+						await img.decode();
+						const canvas = document.createElement('canvas');
+						canvas.width = img.width;
+						canvas.height = img.height;
+						const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+						ctx.drawImage(img, 0, 0);
+						return Array.from(ctx.getImageData(box[0], box[1], box[2], box[3]).data).join(',');
+					},
+					[`data:image/png;base64,${readFileSync(png).toString('base64')}`, [x, y, w, h]] as const,
+				);
+			expect(await pixels(plain, 1270, 790, 1, 1)).toBe('20,22,26,255');
+			const region = [nav.x, nav.y, nav.width, nav.height].map(Math.round) as [
+				number,
+				number,
+				number,
+				number,
+			];
+			expect(await pixels(masked, ...region)).not.toBe(await pixels(plain, ...region));
+			expect(await pixels(masked, 1000, 600, 200, 100)).toBe(
+				await pixels(plain, 1000, 600, 200, 100),
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	test('help lists book and pages with their flags', async () => {

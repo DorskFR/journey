@@ -1,7 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Config } from '../core/types.js';
+import type { Page } from '@playwright/test';
+import type { Config, TargetPath } from '../core/types.js';
+import { retryScreenshot } from '../playwright/capture.js';
 import { ensureMounted, errorLine, startUrl } from '../playwright/driver.js';
+import { applyFixture, applyStorageState, storageStatePath } from '../playwright/fixtures.js';
 import { injectRuntime } from '../playwright/inject.js';
 import { withAppBrowser } from './app.js';
 import {
@@ -18,8 +21,13 @@ import { type Argv, flagString, launchOptions } from './main.js';
 export interface PageEntry {
 	route: string;
 	name: string;
+	fixture?: string;
 	variants: Array<Record<string, string>>;
 }
+
+type PageSpec = Exclude<NonNullable<Config['pages']>[number], string> & { fixture?: string };
+
+export const NETWORK_IDLE_TIMEOUT = 5000;
 
 export function pageName(route: string): string {
 	const url = new URL(route, 'http://journey.invalid');
@@ -48,7 +56,12 @@ export function pageEntries(config: Config): PageEntry[] {
 	const configDims = variantNames(config);
 	const routes = new Map<string, string>();
 	return (config.pages ?? []).map((entry) => {
-		const spec = typeof entry === 'string' ? { route: entry } : entry;
+		const spec: PageSpec = typeof entry === 'string' ? { route: entry } : entry;
+		if (spec.fixture !== undefined && !config.fixtures?.[spec.fixture]) {
+			throw new Error(
+				`journey pages: fixture "${spec.fixture}" of ${spec.route} is not defined in the config`,
+			);
+		}
 		const name = spec.name ?? pageName(spec.route);
 		if (!SAFE_NAME.test(name)) {
 			throw new Error(
@@ -62,7 +75,10 @@ export function pageEntries(config: Config): PageEntry[] {
 			);
 		}
 		routes.set(name.toLowerCase(), spec.route);
-		return { route: spec.route, name, variants: combinations(spec.variants ?? configDims) };
+		const variants = combinations(spec.variants ?? configDims);
+		return spec.fixture === undefined
+			? { route: spec.route, name, variants }
+			: { route: spec.route, name, fixture: spec.fixture, variants };
 	});
 }
 
@@ -80,21 +96,66 @@ export function renderPagesIndex(
 	return `${lines.join('\n').trimEnd()}\n`;
 }
 
+export async function settlePage(page: Page): Promise<void> {
+	await page
+		.waitForLoadState('networkidle', { timeout: NETWORK_IDLE_TIMEOUT })
+		.catch(() => undefined);
+	await page.evaluate(() => document.fonts.ready);
+}
+
+export async function applyMasks(
+	page: Page,
+	masks: TargetPath[],
+	params: Record<string, string>,
+): Promise<void> {
+	if (!masks.length) return;
+	await page.evaluate(
+		([paths, p]) => {
+			const runtime = (
+				window as unknown as {
+					journeyRuntime: { Masker: new () => { apply(m: string[], p: object): void } };
+				}
+			).journeyRuntime;
+			new runtime.Masker().apply(paths, p);
+		},
+		[masks, params] as const,
+	);
+}
+
 async function shoot(
 	loaded: LoadedConfig,
-	page: import('@playwright/test').Page,
-	route: string,
+	page: Page,
+	entry: PageEntry,
 	variant: Record<string, string>,
 	file: string,
 ): Promise<void> {
-	await page.goto(startUrl(baseUrl(loaded), route));
-	await ensureMounted(page);
-	for (const [dim, value] of Object.entries(variant)) {
-		if (dim === 'viewport') continue;
-		await page.evaluate(([d, v]) => window.__journey?.applyVariant(d, v), [dim, value] as const);
+	const url = baseUrl(loaded);
+	const storage = storageStatePath(entry.fixture, loaded.config, loaded.dir);
+	if (storage) await applyStorageState(page.context(), storage);
+	const fixture = await applyFixture(entry.fixture, loaded.config, {
+		baseUrl: url,
+		context: page.context(),
+		request: page.request,
+		configDir: loaded.dir,
+	});
+	try {
+		await page.goto(startUrl(url, entry.route));
+		await ensureMounted(page);
+		for (const [dim, value] of Object.entries(variant)) {
+			if (dim === 'viewport') continue;
+			await page.evaluate(([d, v]) => window.__journey?.applyVariant(d, v), [dim, value] as const);
+		}
+		const params: Record<string, string> = { ...fixture.params };
+		for (const [dim, value] of Object.entries(variant)) params[`variant.${dim}`] = value;
+		await settlePage(page);
+		await applyMasks(page, loaded.config.mask ?? [], params);
+		writeFileSync(
+			file,
+			await retryScreenshot(page, { type: 'png', animations: 'disabled', caret: 'hide' }),
+		);
+	} finally {
+		await fixture.stop();
 	}
-	await page.evaluate(() => document.fonts.ready);
-	await page.screenshot({ path: file, type: 'png' });
 }
 
 export async function runPages(argv: Argv): Promise<number> {
@@ -123,7 +184,7 @@ export async function runPages(argv: Argv): Promise<number> {
 				let ok = true;
 				let error = '';
 				try {
-					await shoot(loaded, page, entry.route, variant, join(dir, `${key}.png`));
+					await shoot(loaded, page, entry, variant, join(dir, `${key}.png`));
 					keys.push(key);
 				} catch (e) {
 					ok = false;

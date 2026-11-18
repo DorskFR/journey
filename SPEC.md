@@ -809,33 +809,49 @@ or cross.
   `visual` baselines under `<out>/<id>/`), records
   `tour.webm` when `--video` or any capture has `video`, converts to `mp4`
   and `gif` when ffmpeg exists (formats from config, default webm and mp4),
-  writes `storyboard.png`, `manifest.json`, `index.md`, `index.html`.
+  writes `storyboard.png`, `manifest.json`, `index.md`, `index.html`, and with
+  a video `tour.vtt`: one cue per capture with a `say` title or body, from the
+  capture's time since the video started to the next capture (the last to the
+  end of the video). When a configured `mp4` or `gif` needs ffmpeg and it is
+  missing, one warning on stderr. A screenshot that fails with the transient
+  `Unable to capture screenshot` protocol error is retried twice, 100 ms
+  apart, before the step fails.
   `--variant` repeats of one dim are OR, dims are AND; an unknown dim or value,
   or a filter no selected journey matches, exits 1 listing the valid ones. The
   journey-level `<out>/book/<id>/manifest.json` and index merge this run's
   variants with the ones already booked on disk, in matrix order.
   `variantKey` is the dims joined with `-` in config order, for example
   `desktop-light`.
-- `pages`: for each `config.pages` route and variant, navigates and captures
-  the viewport to `<out>/pages/<name>/<variantKey>.png`, writes
+- `pages`: for each `config.pages` route and variant, applies the page's
+  `fixture` (storage state, HAR, command, setup) or the config `storageState`,
+  navigates, applies the variant, waits for `networkidle` (at most 5 s), blurs
+  the config `mask` targets and captures the viewport with animations disabled
+  and the caret hidden to `<out>/pages/<name>/<variantKey>.png`, writes
   `<out>/pages/index.md` with a table per page. The default `name` is the
   route's path (without its extension), query and hash, lowercased, with every
   run of other characters turned into `-`, `home` when empty. A `name` must
   match `^[A-Za-z0-9][A-Za-z0-9._-]*$`; two pages with one name (case-folded)
-  fail before anything runs.
+  fail before anything runs, as does a `fixture` the config does not define.
 
 `media.ts`: `hasFfmpeg()`; `toMp4(webm, mp4)` with
 `-c:v libx264 -pix_fmt yuv420p -movflags +faststart -crf 23`; `toGif(webm, gif)`
 with `fps=12,scale=800:-1:flags=lanczos` and palettegen/paletteuse;
-`storyboard(pngPaths, out, page)` draws the images into a canvas in a blank
-Playwright page, three per row, 400 px wide cells with a 1-based number badge,
-and screenshots it. No ffmpeg for the storyboard.
+`storyboard(pngPaths, out, browser)` draws the images into a canvas in a blank
+Playwright page, three per row, 400 px wide cells as tall as the largest image's
+aspect ratio, each image scaled to fit its cell and centred on grey, with a
+1-based number badge, and screenshots it. No ffmpeg for the storyboard.
+`renderVtt(marks, end)` writes the caption track.
 
 `report.ts`: `manifest` is
-`{ id, title, version, variants: Record<variantKey, { captures: Array<{ index, name, file, title, body }>, video?: Record<format, file>, storyboard: string }> }`.
+`{ id, title, version, variants: Record<variantKey, { captures: Array<{ index, name, file, title, body }>, video?: Record<format, file>, captions?: string, storyboard: string }> }`.
 `index.md` has the journey title, then per variant a heading and one figure
 per capture: image, then the resolved `say.title` in bold and `say.body`.
-`index.html` is the same as a fragment with `<figure>`/`<figcaption>`.
+`index.md` and `index.html` end each variant with its video links, captions
+and storyboard. `index.html` is a standalone page (`<!doctype html>`,
+`<meta charset="utf-8">`, `lang` when every variant has one locale) with the
+same content in `<figure>`/`<figcaption>`, and a `<video>` with the `mp4` and
+`webm` sources and a default captions `<track>`; `renderHtmlFragment` returns
+the body alone.
 Text is resolved with the config-free fallback rules of section 5 plus the
 in-page `translate` when the app registered one (ask the page).
 

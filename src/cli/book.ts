@@ -18,7 +18,7 @@ import {
 } from './config.js';
 import { HARNESS_COMPILE, type LoadedJourney, type LoadedJourneys, loadJourneys } from './load.js';
 import { type Argv, flagString, launchOptions, REPEAT_SEPARATOR } from './main.js';
-import { hasFfmpeg, storyboard, toGif, toMp4 } from './media.js';
+import { type CaptionMark, hasFfmpeg, renderVtt, storyboard, toGif, toMp4 } from './media.js';
 import {
 	type Manifest,
 	type ManifestCapture,
@@ -140,6 +140,7 @@ export function captureFile(index: number, name: string): string {
 }
 
 export const BOOK_DIR = 'book';
+export const CAPTIONS_FILE = 'tour.vtt';
 
 export function bookRoot(loaded: LoadedConfig): string {
 	return join(outDir(loaded), BOOK_DIR);
@@ -215,14 +216,19 @@ async function bookVariant(
 	const captures: ManifestCapture[] = [];
 	const files: string[] = [];
 	let stopVideo: (() => Promise<void>) | undefined;
+	let videoStart = 0;
+	let videoEnd = 0;
+	const marks: CaptionMark[] = [];
 	let ok = false;
 	let error: string | undefined;
 	try {
 		if (wantsVideo(ir, opts.video)) {
 			const size = loaded.config.video?.size ?? viewport;
 			stopVideo = await startVideo(page, join(dir, 'tour.webm'), size);
+			videoStart = Date.now();
 		}
 		const onCapture = async (spec: Capture, ctx: CaptureContext): Promise<void> => {
+			if (stopVideo) marks.push({ at: Date.now() - videoStart, title: ctx.title, body: ctx.body });
 			const file = captureFile(captures.length, spec.name);
 			writeFileSync(join(dir, file), await captureStep(page, spec, ctx));
 			files.push(join(dir, file));
@@ -240,13 +246,23 @@ async function bookVariant(
 		error = errorLine(e);
 		console.error(e instanceof Error ? e.message : String(e));
 	} finally {
-		if (stopVideo) await stopVideo();
+		if (stopVideo) {
+			videoEnd = Date.now() - videoStart;
+			await stopVideo();
+		}
 		await context.close();
 	}
 	const manifest: ManifestVariant = { captures };
 	try {
 		const video = convertVideo(dir, opts.formats);
-		if (Object.keys(video).length) manifest.video = video;
+		if (Object.keys(video).length) {
+			manifest.video = video;
+			const vtt = renderVtt(marks, videoEnd);
+			if (vtt) {
+				writeFileSync(join(dir, CAPTIONS_FILE), vtt);
+				manifest.captions = CAPTIONS_FILE;
+			}
+		}
 		if (files.length) {
 			await storyboard(files, join(dir, 'storyboard.png'), browser);
 			manifest.storyboard = 'storyboard.png';
@@ -294,6 +310,16 @@ export async function runBook(argv: Argv): Promise<number> {
 		video: argv.flags.video === true,
 		formats: loaded.config.video?.formats ?? DEFAULT_FORMATS,
 	};
+	const converts = opts.formats.filter((format) => format !== 'webm');
+	if (
+		converts.length &&
+		selected.some((entry) => wantsVideo(entry.ir, opts.video)) &&
+		!hasFfmpeg()
+	) {
+		console.error(
+			`journey book: ffmpeg not found, keeping tour.webm and skipping ${converts.join(' and ')}`,
+		);
+	}
 	const out = bookRoot(loaded);
 	const launch = launchOptions(argv);
 	if (!launch.headless) {
@@ -315,7 +341,11 @@ export async function runBook(argv: Argv): Promise<number> {
 				variants: {},
 			};
 			const labels: Record<string, string> = {};
-			for (const variant of matrix) labels[variantKey(variant)] = variantLabel(variant);
+			const locales: Record<string, string> = {};
+			for (const variant of matrix) {
+				labels[variantKey(variant)] = variantLabel(variant);
+				if (variant.locale) locales[variantKey(variant)] = variant.locale;
+			}
 			for (const variant of variants) {
 				const key = variantKey(variant);
 				const dir = variantDir(out, ir.id, key);
@@ -328,7 +358,7 @@ export async function runBook(argv: Argv): Promise<number> {
 					variants: { [key]: result.manifest },
 				};
 				writeManifest(dir, manifest);
-				writeReport(dir, manifest, labels);
+				writeReport(dir, manifest, labels, locales);
 				combined.title ||= title;
 				combined.variants[key] = prefixFiles(result.manifest, key);
 				if (!result.ok) failed += 1;
@@ -339,7 +369,7 @@ export async function runBook(argv: Argv): Promise<number> {
 			if (variants.length) {
 				const merged = mergeJourneyManifest(journeyDir, combined, matrix);
 				writeManifest(journeyDir, merged);
-				writeReport(journeyDir, merged, labels);
+				writeReport(journeyDir, merged, labels, locales);
 			}
 		}
 	});
