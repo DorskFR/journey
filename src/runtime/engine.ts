@@ -253,6 +253,54 @@ export class Engine {
 		});
 	}
 
+	private bounded<T>(promise: Promise<T>, ms: number): Promise<{ value: T } | null> {
+		return this.race(
+			new Promise<{ value: T } | null>((resolve, reject) => {
+				const timer = setTimeout(() => resolve(null), Math.max(0, ms));
+				promise.then(
+					(value) => {
+						clearTimeout(timer);
+						resolve({ value });
+					},
+					(error) => {
+						clearTimeout(timer);
+						reject(error);
+					},
+				);
+			}),
+		);
+	}
+
+	private async within(label: string, work: void | Promise<void>, ms: number): Promise<void> {
+		if (!(await this.bounded(Promise.resolve(work), ms))) {
+			throw new Error(`${label}: no result after ${ms}ms`);
+		}
+	}
+
+	private watchDetach(el: Element): {
+		signal: AbortSignal;
+		detached: () => boolean;
+		stop: () => void;
+	} {
+		const controller = new AbortController();
+		let detached = false;
+		const onAbort = (): void => controller.abort();
+		this.signal.addEventListener('abort', onAbort, { once: true });
+		const timer = setInterval(() => {
+			if (el.isConnected) return;
+			detached = true;
+			controller.abort();
+		}, POLL_INTERVAL);
+		return {
+			signal: controller.signal,
+			detached: () => detached,
+			stop: () => {
+				clearInterval(timer);
+				this.signal.removeEventListener('abort', onAbort);
+			},
+		};
+	}
+
 	private async poll<T>(
 		fn: () => T | undefined | Promise<T | undefined>,
 		timeout: number | null,
@@ -283,7 +331,11 @@ export class Engine {
 		return { ...this.deps.params, ...resolveStepParams(step.params, this.deps.params) };
 	}
 
-	private async checkExpectation(e: Expectation, params: Params): Promise<string | null> {
+	private async checkExpectation(
+		e: Expectation,
+		params: Params,
+		deadline: number,
+	): Promise<string | null> {
 		const single = (target: Target, label: string) => {
 			const r = resolveOne(target, params);
 			if (r.error === 'notfound') return { error: `${label} ${describeTarget(target)}: 0 matches` };
@@ -356,7 +408,15 @@ export class Engine {
 		}
 		const probe = this.deps.probes?.[e.probe];
 		if (!probe) return `probe ${e.probe}: not registered`;
-		const observed = await probe();
+		let answer: { value: unknown } | null;
+		try {
+			answer = await this.bounded(Promise.resolve().then(probe), deadline - performance.now());
+		} catch (error) {
+			if (error instanceof AbortError) throw error;
+			return `probe ${e.probe}: threw ${error instanceof Error ? error.message : String(error)}`;
+		}
+		if (!answer) return `probe ${e.probe}: no answer before the step timeout`;
+		const observed = answer.value;
 		if (
 			e.equals === undefined
 				? Boolean(observed)
@@ -388,9 +448,10 @@ export class Engine {
 		const expectations = step.expect ?? [];
 		if (expectations.length === 0) return;
 		let lastError: string | null = null;
+		const deadline = performance.now() + step.timeout;
 		const passed = await this.poll(async () => {
 			for (const e of expectations) {
-				const error = await this.checkExpectation(e, params);
+				const error = await this.checkExpectation(e, params, deadline);
 				if (error !== null) {
 					lastError = error;
 					return undefined;
@@ -418,13 +479,12 @@ export class Engine {
 	private async resolveTarget(step: IRStep, params: Params): Promise<Element | null> {
 		if (step.target === undefined) return null;
 		const target = step.target;
-		const timeout = this.deps.actor.human ? null : step.timeout;
 		const found = await this.poll<{ el: Element } | { count: number }>(() => {
 			const r = resolveOne(target, params);
 			if (r.error === undefined) return { el: r.el };
 			if (r.error === 'ambiguous') return { count: r.count };
 			return undefined;
-		}, timeout);
+		}, step.timeout);
 		if (found === undefined) {
 			if (step.optional) throw new StepSkip(`target ${describeTarget(target)} not found`);
 			throw new Error(`target ${describeTarget(target)}: 0 matches after ${step.timeout}ms`);
@@ -530,14 +590,31 @@ export class Engine {
 							}
 						}
 						progress?.save(i, false);
-						const el = await this.resolveTarget(step, params);
-						this.emit('step:resolved', { ...stepData, target: step.target ?? null });
-						acting.show(step, el, showCtx);
-						this.keepMasked(step, params, el);
-						this.applyMasks(params);
-						await sleep(paceOf(step, 'beforeAction'), this.signal);
-						if (el && acting.moveCursor) await this.race(acting.moveCursor(el));
-						await this.race(actor.perform(step, el, action, ctx));
+						if (!scripted && step.target !== undefined) {
+							acting.show(step, null, { ...showCtx, next: null });
+						}
+						let el = await this.resolveTarget(step, params);
+						for (;;) {
+							this.emit('step:resolved', { ...stepData, target: step.target ?? null });
+							acting.show(step, el, showCtx);
+							this.keepMasked(step, params, el);
+							this.applyMasks(params);
+							await sleep(paceOf(step, 'beforeAction'), this.signal);
+							if (el && acting.moveCursor) {
+								await this.within('presenter moveCursor', acting.moveCursor(el), step.timeout);
+							}
+							const onEl = action.kind !== 'none' && action.kind !== 'navigate';
+							const watch = el && onEl && actor.human ? this.watchDetach(el) : null;
+							try {
+								await this.race(
+									actor.perform(step, el, action, watch ? { ...ctx, signal: watch.signal } : ctx),
+								);
+							} finally {
+								watch?.stop();
+							}
+							if (!watch?.detached()) break;
+							el = await this.resolveTarget(step, params);
+						}
 						if (el && (action.kind === 'click' || action.kind === 'dblclick')) acting.ripple?.(el);
 						this.emit('step:acted', { ...stepData, action: redacted(step, action) });
 						progress?.save(i, true);
@@ -551,7 +628,7 @@ export class Engine {
 						if (actor.resume) await this.race(actor.resume(step, ctx));
 					}
 					await this.waitExpectations(step, params);
-					await this.race(Promise.resolve(acting.settle(step)));
+					await this.within('presenter settle', acting.settle(step), step.timeout);
 					await sleep(paceOf(step, 'afterSettle'), this.signal);
 					this.applyMasks(params);
 					result.completed += 1;

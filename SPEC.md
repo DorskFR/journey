@@ -305,6 +305,8 @@ interface MountOptions {
 	launcher?: boolean;                        // default false; small floating button listing journeys
 	strings?: Partial<Strings> | ((locale: string | undefined) => Partial<Strings>);
 	                                           // overrides for the runtime's own text; a function is called with the current locale at show time
+	params?: Record<string, string> | ((id: string) => Record<string, string> | undefined);
+	                                           // under the params of every start, resume included; a function is called per start
 }
 
 interface Strings {
@@ -317,13 +319,17 @@ interface Strings {
 }
 ```
 
-`mount` is idempotent: if `window.__journey` exists it returns it. It
-returns and installs `window.__journey`:
+If `window.__journey` exists, `mount(options)` assigns `options` over the
+mounted runtime's options (re-rendering the launcher, applying `placement`,
+mounting the editor and registering `journeys` when given) and returns the
+same api; `mount()` returns it unchanged. Otherwise it returns and installs
+`window.__journey`:
 
 ```ts
 interface JourneyApi {
-	register(journeys: Journey[], opts?: { params?: Record<string, string> }): Promise<void>;
-	                                           // validate, compile, add to the list (replaces same id); params feed a resumed run
+	register(journeys: Journey[], opts?: { params?: Record<string, string> }): Promise<{ registered: string[]; rejected: Array<{ index: number; id?: string; error: string }> }>;
+	                                           // validate and compile each journey on its own, add the valid ones (replaces same id);
+	                                           // an invalid one is skipped with console.error and drops the journey of its id; params feed a resumed run
 	list(): Array<{ id: string; title?: string; version: number }>;
 	start(id: string, opts?: { mode?: 'guide' | 'preview' | 'run'; from?: number; params?: Record<string, string> }): Promise<RunResult>;
 	                                           // guide: human actor + guide presenter; preview: stepped actor (dom actions gated on Next, Enter, Space or ArrowRight) + guide presenter; run: dom actor + no presenter
@@ -336,6 +342,7 @@ interface JourneyApi {
 	overlay: Overlay;
 	resolve: { resolveOne, resolveAll, resolvePath, accessibleName, computedRole, isVisible, resolveStepParams };
 	version: string;
+	unmount(): void;                           // stop the run, remove the click listener, overlay, launcher and window.__journey
 }
 
 interface Overlay {
@@ -356,10 +363,21 @@ itself.
 Also: a delegated click listener on `[data-journey-start]` calls
 `start(value)`. `autostart` journeys start in guide mode when the current
 pathname equals their `autostart.route`; `once` is remembered in
-`localStorage['journey:done:<id>@<version>']`. On mount, if
+`localStorage['journey:done:<id>@<version>']` when the run completes or the
+user exits it, not when it fails. On mount, if
 `sessionStorage['journey:progress']` exists for a listed journey, the run
-resumes at the stored index in the stored mode, with the stored params plus
-the `params` passed to that `register` call (§5.4).
+resumes at the stored index in the stored mode, with the mount `params`, the
+stored params and the `params` passed to that `register` call, in that order
+of precedence (§5.4).
+
+Before a run starts, the runtime checks every param its remaining steps read
+(step params, target path params, fill and select values, `value`
+expectations), skipping steps whose `when` does not match. In guide mode a
+fill or select param nobody supplied is asked: the step accepts any input and
+the param reads the field's value from then on. Any other missing param, in
+any mode, fails the run before it starts:
+`{ ok: false, completed: 0, failures: [{ stepId, error: 'missing param "<name>": …' }] }`,
+logged with `console.error`.
 
 Engine (`engine.ts`): `new Engine(ir, deps)` where deps are
 `{ actor, presenter, params, variant, translate, probes, pace, mask, track }`.
@@ -381,9 +399,14 @@ Per step:
    navigation, and a resumed step that forced one already fails on the next
    miss instead of navigating again. After navigation the engine continues
    from the same step (progress is persisted before navigating).
-4. Resolve the target with polling every 100 ms up to `timeout`. The human
-   actor has no timeout. `optional` steps skip on timeout. Ambiguity fails
-   immediately with the count in the error.
+4. Resolve the target with polling every 100 ms up to `timeout`, for every
+   actor. The human and stepped actors first draw the step with no target
+   and no Next, so Exit and Escape work while it is pending. `optional` steps
+   skip on timeout; any other step fails the run, which clears progress so a
+   missing target is not resumed on the next load. Ambiguity fails
+   immediately with the count in the error. For the human actor, a target
+   that leaves the document while the engine waits for the user is resolved
+   again with a fresh timeout and the step is drawn on the new element.
 5. `presenter.show(step, el, ctx)` where ctx has index, total, resolved say
    text, and a `next()` callback for `guide: 'next'` steps. A step with its own
    `presenter` is drawn by that one instead, and the outgoing presenter is
@@ -393,14 +416,20 @@ Per step:
 6. Apply masks (section 5.3; they stay live until the run ends), wait `step.pace.beforeAction ?? pace.beforeAction`,
    move the cursor to the element if the presenter has one. `moveCursor`
    resolves on `transitionend`, on `transitioncancel`, or on a timer just past
-   the transition it asked for: a transition that never starts fires neither
-   event, and no caller has a timeout, so the run would hang on the step.
+   the transition it asked for, since a transition that never starts fires
+   neither event. A host `moveCursor` that has not resolved within the step
+   timeout fails the step.
 7. `actor.perform(step, el)`; the engine draws the click ripple when the actor
    reports completion.
 8. Wait for all expectations, polling every 100 ms up to `timeout`. A failing
    expectation produces an error string naming the expectation and the
-   observed state, for example `visible notes/dialog: 0 matches`.
-9. `presenter.settle(step)`, wait `step.pace.afterSettle ?? pace.afterSettle`, emit `capture` (the
+   observed state, for example `visible notes/dialog: 0 matches`. Each probe
+   call is raced against the time left: a probe that throws or has not
+   answered counts as not passing yet and is retried until the timeout, and
+   the error names the last outcome (`probe store: threw not ready`,
+   `probe store: no answer before the step timeout`).
+9. `presenter.settle(step)`, failing the step if it has not resolved within
+   the step timeout, wait `step.pace.afterSettle ?? pace.afterSettle`, emit `capture` (the
    driver yields it to the host), persist progress, continue.
 
 Events emitted via a small emitter and forwarded to `track`:
@@ -468,8 +497,13 @@ banners inject and smooth scrolls stay in flight without reporting any event,
 and a rect measured once leaves the box on the wrong element. The per-frame
 pass re-measures only, and lays out again only when the rect changed. The
 `spot` transition is 80 ms so a correction cannot slide across the page.
-Escape exits a guide run only for the human actor; driven and preview runs
-ignore it so a scripted Escape keystroke is not an exit. The spotlight scrolls
+Escape exits guide and preview runs; driven runs ignore it, and so does every
+run for an untrusted (scripted) keystroke. It is handled on `window` in the
+bubble phase, after the page, and is ignored when the page called
+`preventDefault()`, when focus is inside an open `dialog`, a `[popover]`, a
+`[role=menu]` or `[role=listbox]` or on an `aria-expanded="true"` control
+outside the overlay, and on a step whose action is pressing Escape (its Exit
+button then shows no `Esc` hint). The spotlight scrolls
 the target into view (`scrollIntoView({ block: 'center' })`) before measuring.
 
 Presenter factories take the `t(key, vars)` helper built from `strings`
@@ -506,8 +540,9 @@ Written before navigation and after each step; removed on done or abort.
 `params` never holds a secret: keys under `var.`, keys matching the
 sensitive-name rule (`pass`, `token`, `secret`, `otp`, `card`, `cvc`, `ssn`)
 and the params of `mask: true` fills are left out. A resumed run gets them
-back from `register(journeys, { params })`; without them, the first step that
-needs one fails with `Unresolved param`. The driver resumes with the params
+back from `mount({ params })` or `register(journeys, { params })`; without
+them, a guide asks again for fill and select params and any other missing
+param fails the run before it starts (§5). The driver resumes with the params
 the host passes to `load` again.
 
 ## 6. Editor

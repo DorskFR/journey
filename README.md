@@ -146,11 +146,53 @@ if (import.meta.env.PUBLIC_JOURNEY) {
 Start a guide with `window.__journey.start('create-note')` or a
 `data-journey-start="create-note"` attribute on any element.
 
+### Params in the app
+
+A guide asks the user for its `fill` and `select` params: the step accepts
+whatever they type or pick, and later steps that read the same param get that
+value. Every other param (a target key, a step param, a param an expectation
+reads before any step asked for it) has to be supplied. Give them to every
+in-app start (`data-journey-start`, the launcher, autostart, a resumed run)
+with `mount({ params })`, an object or a function of the journey id:
+
+```ts
+mount({ params: (id) => ({ 'fixture.noteId': currentNote() }) });
+```
+
+`start(id, { params })` overrides them for one run. A run that lacks a param
+it cannot ask for does not start: `start` resolves with
+`{ ok: false, failures: [{ stepId, error: 'missing param "…"' }] }` and logs
+it to the console. Preview and run mode ask for nothing, so every param they
+read must be supplied.
+
+### Registering, re-mounting and unmounting
+
+`register` validates each journey on its own. An invalid one is skipped with a
+`console.error`, drops any journey registered earlier under its id, and the
+rest are registered; it resolves with `{ registered: string[], rejected:
+Array<{ index, id?, error }> }`.
+
+Calling `mount` again applies the new options to the mounted runtime and
+returns the same api; `mount()` with no options just returns it.
+`window.__journey.unmount()` stops the run and removes the click listener,
+the overlay, the launcher and `window.__journey`, so the next `mount` starts
+fresh, for example after a user switch with a per-user `storage` adapter.
+
 When a step names a route the user is not on, the guide offers to take them
 there rather than moving on its own. `navigate` hands that over to the host
 router; without it the button assigns `location.href`, which costs a document
 load but resumes from the saved progress. Nothing navigates until the user
 presses the button.
+
+While a step's target is not on the page, its card is drawn without a
+spotlight, with Exit. If the target does not appear within the step's
+`timeout` (10 s by default), an `optional` step is skipped and any other step
+ends the guide as failed, so it is not resumed on the next load. A target the
+page re-renders is found again.
+
+Escape exits the guide, unless the page handled it first (`preventDefault()`),
+focus is in an open dialog, popover, menu or listbox or on an expanded
+control, or the step itself asks the user to press Escape.
 
 `register` resolves once a resumed or autostarted run has been picked up, so
 `await` it before reading `window.__journey.engine()`.
@@ -158,7 +200,8 @@ presses the button.
 ### Where the guide state lives
 
 Two things are remembered: where a run got to, and whether an `autostart.once`
-journey has been seen. By default the first goes to `sessionStorage` and the
+journey has been seen. It counts as seen once it completes or the user exits
+it; a run that fails is offered again on the next load. By default the first goes to `sessionStorage` and the
 second to `localStorage`, which keeps them in one browser.
 
 Pass a `storage` adapter to put them somewhere else — a user record on the
@@ -178,9 +221,10 @@ mount({
 The adapter receives the run's position, mode, variant and non-secret
 params. Params under `var.`, params whose name looks sensitive (`pass`,
 `token`, `secret`, `otp`, `card`, `cvc`, `ssn`) and the params of `mask: true`
-fills are never stored. To resume a run that needs them, pass them again:
-`register(journeys, { params })`. Otherwise the run resumes and fails at the
-first step that needs one.
+fills are never stored. To resume a run that needs them, pass them again with `mount({ params })`,
+or `register(journeys, { params })` for that resume only. A fill param the
+user is asked for is asked again; any other missing param ends the resumed
+run before it draws anything.
 
 Bumping a journey's `version` already invalidates a stale resume and re-arms
 `autostart.once`, so a guide that gained a step comes back for everyone.
@@ -209,12 +253,16 @@ mount({
 });
 ```
 
-`show`, `settle` and `hide` are required. `show` is called once per step with the
-resolved target element, or `null` when the step has none, and a context holding
+`show`, `settle` and `hide` are required. `show` is called for each step with the
+resolved target element, or `null` when the step has none; in guide and
+preview runs it is first called with `null` while the target is pending, and in
+guide runs again when the page replaces the target. Its context holds
 the localized `title` and `body`, the step's `index` and `total`, the `action` it
 performs, and `next` and `exit` callbacks. `next` is `null` when the step waits
 for the user to act on the page rather than press a button. `settle` runs after
-the step's expectations hold and may return a promise to delay the next step.
+the step's expectations hold and may return a promise to delay the next step;
+one still pending at the step's `timeout` fails the step, and so does a
+pending `moveCursor`.
 `hide` runs once when the run ends or is aborted.
 
 `message`, `moveCursor` and `ripple` are optional. `message` shows a card with

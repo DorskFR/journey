@@ -206,11 +206,24 @@ export function mountEditor(api: JourneyApi | undefined = window.__journey): Edi
 		render();
 		api.register([built]);
 		const done = api.start(draft.id, { mode, params: varParams(vars) });
-		attach(api.engine());
-		done.catch((e: unknown) => {
-			error = e instanceof Error ? e.message : String(e);
-			finish('fail');
-		});
+		const engine = api.engine();
+		attach(engine);
+		done.then(
+			(result) => {
+				if (engine || result.ok) return;
+				for (const failure of result.failures) {
+					const index = draft.steps.findIndex((s) => s.id === failure.stepId);
+					if (index < 0) continue;
+					errors[index] = failure.error;
+					results[index] = 'fail';
+				}
+				finish('fail');
+			},
+			(e: unknown) => {
+				error = e instanceof Error ? e.message : String(e);
+				finish('fail');
+			},
+		);
 	};
 
 	const finish = (result: Outcome): void => {
