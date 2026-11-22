@@ -76,7 +76,6 @@
     "test": "npm run build && playwright test",
     "test:unit": "playwright test --project unit",
     "test:browser": "npm run build && playwright test --project browser",
-    "prepare": "lefthook install || true",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
@@ -92,7 +91,6 @@
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.4.1",
     "esbuild": "^0.28.2",
-    "lefthook": "^2.1.12",
     "typescript": "^7.0.2"
   }
 }
