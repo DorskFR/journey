@@ -1,3 +1,5 @@
+<img src="docs/assets/icon.svg" width="64" height="64" alt="">
+
 # journey
 
 Record a user journey once. Replay it as a QA test, an in-app guided tour,
